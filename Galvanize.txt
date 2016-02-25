@@ -1,0 +1,87 @@
+Configuration	Galvanize
+STM32CubeMX 	4.12.0
+Date	01/22/2016
+MCU	STM32L151CBTx
+
+
+
+PERIPHERALS	MODES	FUNCTIONS	PINS
+ADC	IN8	ADC_IN8	PB0
+ADC	IN9	ADC_IN9	PB1
+ADC	Injected Trigger	ADC_EXTI15	PC15-OSC32_OUT
+RTC	Internal Alarm A	RTC_VS_RTC_Alarm_A_Intern	VP_RTC_VS_RTC_Alarm_A_Intern
+RTC	Internal Alarm B	RTC_VS_RTC_Alarm_B_Intern	VP_RTC_VS_RTC_Alarm_B_Intern
+RTC	Internal WakeUp	RTC_VS_RTC_WakeUp_intern	VP_RTC_VS_RTC_WakeUp_intern
+SPI1	Full-Duplex Master	SPI1_MISO	PA6
+SPI1	Full-Duplex Master	SPI1_MOSI	PA7
+SPI1	Full-Duplex Master	SPI1_SCK	PA5
+SYS	JTAG(5-pin)	SYS_JTCK-SWCLK	PA14
+SYS	JTAG(5-pin)	SYS_JTDI	PA15
+SYS	JTAG(5-pin)	SYS_JTDO-TRACESWO	PB3
+SYS	JTAG(5-pin)	SYS_JTMS-SWDIO	PA13
+SYS	JTAG(5-pin)	SYS_JTRST	PB4
+USART1	Asynchronous	USART1_RX	PA10
+USART1	Asynchronous	USART1_TX	PA9
+USART3	Asynchronous	USART3_RX	PB11
+USART3	Asynchronous	USART3_TX	PB10
+
+
+
+Pin Nb	PINs	FUNCTIONs	LABELs
+4	PC15-OSC32_OUT	ADC_EXTI15	
+6	PH1-OSC_OUT	GPIO_Output	RADIO_POWER
+13	PA3	GPIO_EXTI3	USER_INPUT
+14	PA4	GPIO_Output	/SPI_CS
+15	PA5	SPI1_SCK	
+16	PA6	SPI1_MISO	
+17	PA7	SPI1_MOSI	
+18	PB0	ADC_IN8	BATT_VOLTAGE
+19	PB1	ADC_IN9	DISPLAY_TEMP
+20	PB2	GPIO_Input	BOOT_SELECT1
+21	PB10	USART3_TX	
+22	PB11	USART3_RX	
+25	PB12	GPIO_Input	RADIO_BUSY
+26	PB13	GPIO_Output	DISPLAY_PWM
+27	PB14	GPIO_Output	HOST_READY
+28	PB15	GPIO_Input	RADIO_CARRIER_DETECT
+29	PA8	GPIO_Input	/DISPLAY_BUSY
+30	PA9	USART1_TX	
+31	PA10	USART1_RX	
+32	PA11	GPIO_Output	BORDER_CONTROL
+33	PA12	GPIO_Output	DISPLAY_DISCHARGE
+34	PA13	SYS_JTMS-SWDIO	
+37	PA14	SYS_JTCK-SWCLK	
+38	PA15	SYS_JTDI	
+39	PB3	SYS_JTDO-TRACESWO	
+40	PB4	SYS_JTRST	
+41	PB5	GPIO_Output	/RESET_DISPLAY
+42	PB6	GPIO_Output	DISPLAY_ON_PB6
+43	PB7	GPIO_Output	BATT_READ
+
+
+
+SOFTWARE PROJECT
+
+Project Settings : 
+Project Name : Galvanize
+Project Folder : C:\Users\petec\Dropbox\GalvanizeCode\Galvanize
+Toolchain / IDE : TrueSTUDIO
+Firmware Package Name and Version : STM32Cube FW_L1 V1.4.0
+
+
+Code Generation Settings : 
+STM32Cube Firmware Library Package : Copy all used libraries into the project folder
+Generate peripheral initialization as a pair of '.c/.h' files per IP : Yes
+Backup previously generated files when re-generating : No
+Delete previously generated files when not re-generated : Yes
+Set all free pins as analog (to optimize the power consumption) : Yes
+
+
+Toolchains Settings : 
+Compiler Optimizations : Balanced Size/Speed
+
+
+
+
+
+
