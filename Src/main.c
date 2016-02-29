@@ -54,14 +54,16 @@
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-#define CB_DEMO_0
+//#define CB_DEMO_0
 #define FONT_1 Verdana_Pro_SemiBold18x16
 #define FONT_2 Arial_Rounded_MT_Bold19x20
 #define FONT_3 Arial_Rounded_MT_Bold26x27
-#define MAX_SCREEN 29
-#define DISPLAY_INITIAL 6
-#define DISPLAY_CONNECTING 7
-#define DISPLAY_PROBLEM 8
+#define DISPLAY_INITIAL 0
+#define DISPLAY_CONNECTING 1
+#define DISPLAY_PROBLEM 2
+#define DISPLAY_NORMAL 4
+#define DISPLAY_PRESSED 5
+#define DISPLAY_OVERRIDE 6
 
 #define SEARCH_OK 0
 #define SEARCH_TIMEOUT 1
@@ -70,6 +72,9 @@
 #define SEND_TIMEOUT 1
 #define MAX_SEARCH_TIME 30
 #define ONE_DAY (24*60*60)
+
+#define MAX_SCREEN 29
+#define REGIONS 2
 
 // Function codes:
 #define  f_include_req        0x00
@@ -83,6 +88,7 @@
 #define  f_ack                0x08
 #define  f_beacon             0x0A
 
+char screens[MAX_SCREEN][REGIONS][128];
 HAL_StatusTypeDef status;
 int length;
 uint8_t Rx_Buffer[128];
@@ -94,16 +100,6 @@ uint8_t node_address[2] = {0x00, 0x00};
 uint8_t beacon_address[] = {0xBB, 0xBB};
 uint8_t grant_address[] = {0xBB, 0x00};
 
-const int y_start[5][5] = {
-		{32, 0, 0 ,0, 0},
-		{16, 50, 0, 0, 0},
-		{5, 32, 61, 0, 0},
-		{4, 26, 48, 70},
-		{0, 20, 40, 60, 80}
-};
-
-char screens[MAX_SCREEN][2][128];
-
 int radio_ready   = SET;
 int screen_num = 0;
 RTC_HandleTypeDef hrtc;
@@ -113,7 +109,7 @@ uint8_t sleeping = 0;
 char debug_buff[64] = {0};
 uint8_t config_stored = 0;
 
-typedef enum {initial, normal, pressed, search, search_failed, reverting} NodeState;
+typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
 
 /* USER CODE END PV */
@@ -139,6 +135,8 @@ void Wakeup(void);
 void Set_Wakeup(uint8_t force_awake);
 void Build_Screen(uint8_t screen_num);
 void Store_Config(void);
+void Load_Normal_Screens(void);
+void Load_Demo_Screens(void);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -153,92 +151,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  char buffer[128] = {45};
   int  i, s;
-  int length;
-
-  // Not very elegant, but it does the job and it shouldn't need to change:
-  strcpy(screens[0][0], "F\x02" "Y\x04" "C\x0F" "Welcome to Spur\xFF" "Y\x1A" "C\x0F" "Push here for 3\xFF"
-		                "Y\x30" "C\x12" "seconds to connect\xFF" "Y\x46" "C\x0A" "to network\xFF" "ES");
-  strcpy(screens[1][0], "F\x03" "Y\x10" "C\x0C" "Push here to\xFF" "Y\x32" "C\x0E" "report a fault\xFF" "ES");
-  strcpy(screens[2][0], "F\x03" "Y\x05" "C\x0F" "Fault with this\xFF" "Y\x20" "C\x0D" "appliance has\xFF"
-		                "Y\x3D" "C\x0D" "been reported\xFF" "ES");
-  strcpy(screens[3][0], "F\x03" "Y\x05" "C\x09" "Push here\xFF" "Y\x20" "C\x09" "for table\xFF" "Y\x3D" "C\x07" "service\xFF" "ES");
-  strcpy(screens[4][0], "F\x03" "Y\x05" "C\x08" "A waiter\xFF" "Y\x20" "C\x0C" "will be with\xFF" "Y\x3D" "C\x08" "you soon\xFF" "ES");
-  strcpy(screens[5][0], "F\x02" "X\x18" "Y\x0E" "T\x04" "Push\xFF" "X\x08" "Y\x24" "T\x08" "here for\xFF"
-		                "X\x20" "Y\x3C" "T\x04" "bill\xFF" "X\x7D" "Y\x0E" "T\x04" "Push\xFF" "X\x6D" "Y\x24"
-		                "T\x08" "here for\xFF" "X\x70" "Y\x3C" "T\x07" "service\xFF"
-		                "X\x02" "Y\x02" "B\x5A\x5C" "X\x03" "Y\x03" "B\x58\x5A"
-          	  	  	  	"X\x68" "Y\x02" "B\x5A\x5C" "X\x69" "Y\x03" "B\x58\x5A"
-		                "ES");
-  strcpy(screens[6][0], "F\x03" "Y\x05" "C\x08" "A waiter\xFF" "Y\x20" "C\x0C" "will be with\xFF" "Y\x3D" "C\x08" "you soon\xFF" "ES");
-  strcpy(screens[7][0], "F\x02" "Y\2" "C\x0B" "How was our\xFF" "Y\x16" "C\x0E" "service today?\xFF"
-		                "X\x08" "Y\x31" "T\x08" "Push for\xFF"
-		  	  	  	  	"X\x1A" "Y\x4A" "T\x03" "bad\xFF" "X\x6D" "Y\x31" "T\x08" "Push for\xFF" "X\x7E"
-		                "Y\x47" "T\x04" "good\xFF" "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
-		                "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
-  strcpy(screens[8][0], "F\x03" "Y\x10" "C\x0D" "Thank you for\xFF" "Y\x32" "C\x0D" "your feedback\xFF" "ES");
-  strcpy(screens[9][0], "F\x02" "Y\2" "C\x0B" "How was our\xFF" "Y\x16" "C\x0E" "service today?\xFF"
-		                "X\x08" "Y\x31" "T\x08" "Push for\xFF"
-		  	  	  	  	"X\x1A" "Y\x4A" "T\x03" "bad\xFF" "X\x6D" "Y\x31" "T\x08" "Push for\xFF" "X\x7E"
-		                "Y\x47" "T\x04" "good\xFF" "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
-		                "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
-  strcpy(screens[10][0], "F\x02" "Y\x05" "C\x13" "Push here to report\xFF" "Y\x20" "C\x0E" "a problem with\xFF"
-  		                 "Y\x3D" "C\x10" "these facilities\xFF" "ES");
-  strcpy(screens[11][0], "F\x02" "Y\x05" "C\x0C" "Problem with\xFF" "Y\x20" "C\x10" "these facilities\xFF"
-    		             "Y\x3D" "C\x11" "has been reported\xFF" "ES");
-  strcpy(screens[12][0], "F\x03" "Y\x05" "C\x09" "Push here\xFF" "Y\x20" "C\x0A" "to request\xFF"
-    		             "Y\x3D" "C\x06" "a taxi\xFF" "ES");
-  strcpy(screens[13][0], "F\x02" "Y\x04" "C\x0E" "Taxi requested\xFF" "Y\x1A" "C\x11" "Taxi will be here\xFF"
-		                 "Y\x30" "C\x0F" "at approx 11:35\xFF" "Y\x46" "C\x14" "Push again to cancel\xFF" "ES");
-  strcpy(screens[14][0], "F\x02" "Y\x05" "C\x0F" "Push to send an\xFF" "Y\x22" "C\x10" "AV technician to\xFF"
-    		             "Y\x3D" "C\x0E" "meeting room 1\xFF" "ES");
-  strcpy(screens[15][0], "F\x03" "Y\x10" "C\x0D" "AV technician\xFF" "Y\x32" "C\x09" "requested\xFF" "ES");
-  strcpy(screens[16][0], "F\x03" "Y\x05" "C\x05" "An AV\xFF" "Y\x20" "C\x0D" "technician is\xFF"
-		                 "Y\x3D" "C\x0C" "on their way\xFF" "ES");
-  strcpy(screens[17][0], "F\x02" "Y\x05" "C\x10" "Push here if the\xFF" "Y\x20" "C\x13" "item you're looking\xFF"
-    		             "Y\x3D" "C\x13" "for isn't available\xFF" "ES");
-  strcpy(screens[18][0], "F\x03" "Y\x10" "C\x0D" "Thank you for\xFF" "Y\x32" "C\x0D" "your feedback\xFF" "ES");
-  strcpy(screens[19][0], "F\x02" "Y\x05" "C\x0C" "Push here to\xFF" "Y\x20" "C\x0C" "request more\xFF"
-      		             "Y\x3D" "C\x0F" "coffee capsules\xFF" "ES");
-  strcpy(screens[20][0], "F\x02" "Y\x05" "C\x0B" "More coffee\xFF" "Y\x20" "C\x0D" "capsules have\xFF"
-      		             "Y\x3D" "C\x0E" "been requested\xFF" "ES");
-  strcpy(screens[21][0], "F\x02" "Y\x05" "C\x0C" "Push here if\xFF" "Y\x20" "C\x10" "you want someone\xFF"
-       		             "Y\x3D" "C\x12" "to come to see you\xFF" "ES");
-  strcpy(screens[22][0], "F\x03" "Y\x10" "C\x0C" "Your request\xFF" "Y\x32" "C\x0D" "has been sent\xFF" "ES");
-  strcpy(screens[23][0], "F\x02" "Y\x05" "C\x0C" "Someone will\xFF" "Y\x20" "C\x11" "visit you between\xFF"
-         		         "Y\x3D" "C\x0F" "11:00 and 12:00\xFF" "ES");
-  strcpy(screens[24][0], "F\x02" "Y\2" "C\x0B" "Are you OK?\xFF" "Y\x16" "C\x11" "Please push below\xFF"
- 		                 "F\x03" "X\x1C" "Y\x39" "T\x02" "No\xFF"
-                         "F\x03" "X\x7A" "Y\x39" "T\x03" "Yes\xFF"
- 		                 "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
- 		                 "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
-  strcpy(screens[25][0], "F\x02" "Y\x05" "C\x0C" "Push here if\xFF" "Y\x20" "C\x10" "printer supplies\xFF"
-        		         "Y\x3D" "C\x07" "are low\xFF" "ES");
-  strcpy(screens[26][0], "F\x02" "X\x18" "Y\x0E" "T\x04" "Push\xFF" "X\x08" "Y\x24" "T\x08" "here for\xFF"
- 		                 "X\x16" "Y\x3C" "T\x05" "paper\xFF" "X\x7D" "Y\x0E" "T\x04" "Push\xFF" "X\x6D" "Y\x24"
- 		                 "T\x08" "here for\xFF" "X\x7B" "Y\x3C" "T\x05" "toner\xFF"
- 		                 "X\x02" "Y\x02" "B\x5A\x5C" "X\x03" "Y\x03" "B\x58\x5A"
-           	  	  	  	 "X\x68" "Y\x02" "B\x5A\x5C" "X\x69" "Y\x03" "B\x58\x5A"
- 		                 "ES");
-  strcpy(screens[27][0], "F\x02" "X\x18" "Y\x0E" "T\x04" "Push\xFF" "X\x08" "Y\x24" "T\x08" "here for\xFF"
-  		                 "X\x16" "Y\x3C" "T\x05" "black\xFF" "X\x7D" "Y\x0E" "T\x04" "Push\xFF" "X\x6D" "Y\x24"
-  		                 "T\x08" "here for\xFF" "X\x6D" "Y\x3C" "T\x07" "Y/Cy/Mg\xFF"
-  		                 "X\x02" "Y\x02" "B\x5A\x5C" "X\x03" "Y\x03" "B\x58\x5A"
-            	  	  	 "X\x68" "Y\x02" "B\x5A\x5C" "X\x69" "Y\x03" "B\x58\x5A"
-  		                 "ES");
-  strcpy(screens[28][0], "F\x02" "Y\x04" "C\x0F" "Low black toner\xFF" "Y\x1A" "C\x08" "reported\xFF"
- 		                 "Y\x30" "C\x12" "Push here if other\xFF" "Y\x46" "C\x14" "printer supplies low\xFF" "ES");
-
-  //strcpy(screens[1][0], "F\x01" "Y\x05" "C\x09" "A message\x01" "Y\x20" "C\x08" "has 0Cbeen\x01" "Y\x3D" "C\x04" "sent\x01" "ES");
-  //strcpy(screens[7][0], "F\x01" "Y\x05" "C\x11" "Trying to connect\x01" "Y\x20" "C\x0A" "to network\x01" "Y\x3D" "C\x0B" "Please wait\x01" "ES");
-  //strcpy(screens[8][0], "F\x02" "Y\x10" "C\x15" "Communication problem\x01" "Y\x32" "C\x11" "Button not in use\x01" "ES");
-
-  for(s=0; s<MAX_SCREEN; s++)
-	  for(i=0; i<128; i++)
-		  if(screens[s][0][i] == 0xFF)
-			  screens[s][0][i] = 0x00;
-
   /* USER CODE END 1 */
 
   /* MCU Configuration----------------------------------------------------------*/
@@ -283,9 +196,9 @@ int main(void)
   HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_RESET);
 
   DEBUG_TX("Hello Computer\r\n");
+  Load_Normal_Screens();
   ecog_init();
-  //Set_Screen(&screen[6]);
-  set_display(0);
+  set_display(DISPLAY_INITIAL);
   //ecog_update_display(0);
 
   /*
@@ -307,7 +220,6 @@ int main(void)
   HAL_Delay(200);
   */
 
-#ifndef CB_DEMO_0
   Radio_On();
   RADIO_TXS("Hello World", 11);
   DEBUG_TX("Sent Hello World\r\n");
@@ -320,15 +232,12 @@ int main(void)
 	  DEBUG_TX("Received: ");
 	  DEBUG_TXS(Rx_Buffer, 32);
 	  DEBUG_TX("\r\n");
-	  sprintf(buffer, "Length %d\r\n", length);
-	  DEBUG_TX(buffer);
+	  sprintf(debug_buff, "Length %d\r\n", length);
+	  DEBUG_TX(debug_buff);
   }
   else
   	  DEBUG_TX("Receive problem");
   Radio_Off();
-#else
-  Radio_Off();
-#endif
 
   /* USER CODE END 2 */
 
@@ -515,7 +424,6 @@ void Build_Screen(uint8_t screen_num)
 	}
 }
 
-
 void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin)
 {
 	static uint32_t button_press_time = 0;
@@ -569,35 +477,34 @@ void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin)
 			button_pressed = 0;
 		sprintf(debug_buff,"Pressed time: %d\r\n", (int)pressed_time);
 		DEBUG_TX(debug_buff);
-#ifdef CB_DEMO_0
-		if (pressed_time > T_START_PRESS)
-			screen_num = 0;
-		else
-			screen_num++;
-		if (screen_num == MAX_SCREEN)
-			screen_num = 0;
-		set_display(screen_num);
-		if ((screen_num == 8) | (screen_num == 15) | (screen_num == 22))
+		if (pressed_time > T_RESET_PRESS)
 		{
-			Delay_ms(2500);
-			screen_num++;
-			set_display(screen_num);
+			Load_Normal_Screens();
+			ecog_init();
+			set_display(DISPLAY_INITIAL);
+			Enable_IRQ();
+			node_state = initial;
 		}
-		Enable_IRQ();
-#else
-		if (node_state == initial)
+		else if (node_state == initial)
 		{
+			DEBUG_TX("node_state is initial\r\n");
 			if (pressed_time > T_START_PRESS)
 			{
 				Network_Include();
 			}
 			else
+			{
+				DEBUG_TX("Starting demo mode\r\n");
+				Radio_Off();
 				Enable_IRQ();
+				Load_Demo_Screens();
+				node_state = demo;
+			}
 		}
 		else if(node_state == normal)
 		{
 			DEBUG_TX("node_state normal pressed\r\n");
-			set_display(1);
+			set_display(DISPLAY_PRESSED);
 			alert_id[0] = 0x00; alert_id[1] = 0x00;
 			DEBUG_TX("Sending pressed alert\r\n");
 			Send_Message(f_alert, 2, alert_id, 1);
@@ -610,7 +517,7 @@ void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin)
 			DEBUG_TX("node_state pressed\r\n");
 			if (pressed_time > T_REVERT_PRESS)
 			{
-				set_display(0);
+				set_display(DISPLAY_NORMAL);
 				alert_id[0] = 0x01; alert_id[1] = 0x00;
 				DEBUG_TX("Sending cleared alert\r\n");
 				Send_Message(f_alert, 2, alert_id, 1);
@@ -620,9 +527,25 @@ void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin)
 			}
 			Enable_IRQ();
 		}
+		else if(node_state == demo)
+		{
+			if (pressed_time > T_START_PRESS)
+				screen_num = 0;
+			else
+				screen_num++;
+			if (screen_num == MAX_SCREEN)
+				screen_num = 0;
+			set_display(screen_num);
+			if ((screen_num == 8) | (screen_num == 15) | (screen_num == 22))
+			{
+				Delay_ms(2500);
+				screen_num++;
+				set_display(screen_num);
+			}
+			Enable_IRQ();
+		}
 		else
 			Enable_IRQ();
-#endif
   }
   else
   {
@@ -698,7 +621,7 @@ void Network_Include(void)
 	uint8_t data[] = {0x00, 0x00};
 	Send_Message(f_ack, 0, data, 0);
 	Send_Message(f_woken_up, 0, data, 1);
-	set_display(0);
+	set_display(DISPLAY_NORMAL);
 	Radio_Off();
 	Enable_IRQ();
 	include_state = 0;
@@ -917,6 +840,7 @@ void Set_Wakeup(uint8_t force_awake)
 void Wakeup(void)
 {
 	DEBUG_TX("Woken up\r\n");
+	Enable_IRQ();  // Just in case something's gone wrong and it's disabled
 	sleeping = 0;
 	uint8_t data[] = {0x00, 0x00};
 	Send_Message(f_woken_up, 0, data, 1);
@@ -1103,6 +1027,105 @@ void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
 		Wakeup();
 }
 
+void Load_Normal_Screens(void)
+{
+	// Not very elegant, but it does the job and it shouldn't need to change:
+	int i, s;
+	strcpy(screens[0][0], "F\x02" "Y\x04" "C\x0F" "Welcome to Spur\xFF" "Y\x1A" "C\x0F" "Push here for 3\xFF"
+			              "Y\x30" "C\x12" "seconds to connect\xFF" "Y\x46" "C\x0A" "to network\xFF" "ES");
+	strcpy(screens[1][0], "F\x01" "Y\x05" "C\x11" "Trying to connect\xFF" "Y\x20" "C\x0A" "to network\xFF" "Y\x3D"
+			              "C\x0B" "Please wait\xFF" "ES");
+	strcpy(screens[2][0], "F\x02" "Y\x10" "C\x15" "Communication problem\xFF" "Y\x32" "C\x11"
+			              "Button not in use\xFF" "ES");
+	strcpy(screens[4][0], "F\x01" "Y\x05" "C\x07" "Default\xFF" "Y\x20" "C\x06" "normal\xFF" "Y\x3D"
+			              "C\x06" "screen\xFF" "ES");
+	strcpy(screens[5][0], "F\x01" "Y\x05" "C\x07" "Default\xFF" "Y\x20" "C\x06" "pushed\xFF" "Y\x3D"
+			              "C\x06" "screen\xFF" "ES");
+	for(s=0; s<6; s++)
+		for(i=0; i<128; i++)
+			if(screens[s][0][i] == 0xFF)
+				screens[s][0][i] = 0x00;
+}
+
+void Load_Demo_Screens(void)
+{
+	int i, s;
+	strcpy(screens[0][0], "F\x02" "Y\x04" "C\x0F" "Welcome to Spur\xFF" "Y\x1A" "C\x0F" "Push here for 3\xFF"
+	                	   "Y\x30" "C\x12" "seconds to connect\xFF" "Y\x46" "C\x0A" "to network\xFF" "ES");
+	strcpy(screens[1][0], "F\x03" "Y\x10" "C\x0C" "Push here to\xFF" "Y\x32" "C\x0E" "report a fault\xFF" "ES");
+	strcpy(screens[2][0], "F\x03" "Y\x05" "C\x0F" "Fault with this\xFF" "Y\x20" "C\x0D" "appliance has\xFF"
+	                      "Y\x3D" "C\x0D" "been reported\xFF" "ES");
+	strcpy(screens[3][0], "F\x03" "Y\x05" "C\x09" "Push here\xFF" "Y\x20" "C\x09" "for table\xFF" "Y\x3D" "C\x07" "service\xFF" "ES");
+	strcpy(screens[4][0], "F\x03" "Y\x05" "C\x08" "A waiter\xFF" "Y\x20" "C\x0C" "will be with\xFF" "Y\x3D" "C\x08" "you soon\xFF" "ES");
+	strcpy(screens[5][0], "F\x02" "X\x18" "Y\x0E" "T\x04" "Push\xFF" "X\x08" "Y\x24" "T\x08" "here for\xFF"
+	                      "X\x20" "Y\x3C" "T\x04" "bill\xFF" "X\x7D" "Y\x0E" "T\x04" "Push\xFF" "X\x6D" "Y\x24"
+	                      "T\x08" "here for\xFF" "X\x70" "Y\x3C" "T\x07" "service\xFF"
+			              "X\x02" "Y\x02" "B\x5A\x5C" "X\x03" "Y\x03" "B\x58\x5A"
+	          	  	  	  "X\x68" "Y\x02" "B\x5A\x5C" "X\x69" "Y\x03" "B\x58\x5A"
+			              "ES");
+	strcpy(screens[6][0], "F\x03" "Y\x05" "C\x08" "A waiter\xFF" "Y\x20" "C\x0C" "will be with\xFF" "Y\x3D" "C\x08" "you soon\xFF" "ES");
+	strcpy(screens[7][0], "F\x02" "Y\2" "C\x0B" "How was our\xFF" "Y\x16" "C\x0E" "service today?\xFF"
+			              "X\x08" "Y\x31" "T\x08" "Push for\xFF"
+			  	  	  	  "X\x1A" "Y\x4A" "T\x03" "bad\xFF" "X\x6D" "Y\x31" "T\x08" "Push for\xFF" "X\x7E"
+			              "Y\x47" "T\x04" "good\xFF" "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
+			              "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
+	strcpy(screens[8][0], "F\x03" "Y\x10" "C\x0D" "Thank you for\xFF" "Y\x32" "C\x0D" "your feedback\xFF" "ES");
+	strcpy(screens[9][0], "F\x02" "Y\2" "C\x0B" "How was our\xFF" "Y\x16" "C\x0E" "service today?\xFF"
+			              "X\x08" "Y\x31" "T\x08" "Push for\xFF"
+			  	  	  	  "X\x1A" "Y\x47" "T\x03" "bad\xFF" "X\x6D" "Y\x31" "T\x08" "Push for\xFF" "X\x7E"
+			              "Y\x47" "T\x04" "good\xFF" "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
+			              "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
+	strcpy(screens[10][0], "F\x02" "Y\x05" "C\x13" "Push here to report\xFF" "Y\x20" "C\x0E" "a problem with\xFF"
+	  		               "Y\x3D" "C\x10" "these facilities\xFF" "ES");
+	strcpy(screens[11][0], "F\x02" "Y\x05" "C\x0C" "Problem with\xFF" "Y\x20" "C\x10" "these facilities\xFF"
+	    		           "Y\x3D" "C\x11" "has been reported\xFF" "ES");
+	strcpy(screens[12][0], "F\x03" "Y\x05" "C\x09" "Push here\xFF" "Y\x20" "C\x0A" "to request\xFF"
+	    		           "Y\x3D" "C\x06" "a taxi\xFF" "ES");
+	strcpy(screens[13][0], "F\x02" "Y\x04" "C\x0E" "Taxi requested\xFF" "Y\x1A" "C\x11" "Taxi will be here\xFF"
+			               "Y\x30" "C\x0F" "at approx 11:35\xFF" "Y\x46" "C\x14" "Push again to cancel\xFF" "ES");
+	strcpy(screens[14][0], "F\x02" "Y\x05" "C\x0F" "Push to send an\xFF" "Y\x22" "C\x10" "AV technician to\xFF"
+	    		           "Y\x3D" "C\x0E" "meeting room 1\xFF" "ES");
+	strcpy(screens[15][0], "F\x03" "Y\x10" "C\x0D" "AV technician\xFF" "Y\x32" "C\x09" "requested\xFF" "ES");
+	strcpy(screens[16][0], "F\x03" "Y\x05" "C\x05" "An AV\xFF" "Y\x20" "C\x0D" "technician is\xFF"
+			               "Y\x3D" "C\x0C" "on their way\xFF" "ES");
+	strcpy(screens[17][0], "F\x02" "Y\x05" "C\x10" "Push here if the\xFF" "Y\x20" "C\x13" "item you're looking\xFF"
+	    		           "Y\x3D" "C\x13" "for isn't available\xFF" "ES");
+	strcpy(screens[18][0], "F\x03" "Y\x10" "C\x0D" "Thank you for\xFF" "Y\x32" "C\x0D" "your feedback\xFF" "ES");
+	strcpy(screens[19][0], "F\x02" "Y\x05" "C\x0C" "Push here to\xFF" "Y\x20" "C\x0C" "request more\xFF"
+	      		           "Y\x3D" "C\x0F" "coffee capsules\xFF" "ES");
+	strcpy(screens[20][0], "F\x02" "Y\x05" "C\x0B" "More coffee\xFF" "Y\x20" "C\x0D" "capsules have\xFF"
+	      		           "Y\x3D" "C\x0E" "been requested\xFF" "ES");
+	strcpy(screens[21][0], "F\x02" "Y\x05" "C\x0C" "Push here if\xFF" "Y\x20" "C\x10" "you want someone\xFF"
+	       		           "Y\x3D" "C\x12" "to come to see you\xFF" "ES");
+	strcpy(screens[22][0], "F\x03" "Y\x10" "C\x0C" "Your request\xFF" "Y\x32" "C\x0D" "has been sent\xFF" "ES");
+	strcpy(screens[23][0], "F\x02" "Y\x05" "C\x0C" "Someone will\xFF" "Y\x20" "C\x11" "visit you between\xFF"
+	         		       "Y\x3D" "C\x0F" "11:00 and 12:00\xFF" "ES");
+	strcpy(screens[24][0], "F\x02" "Y\2" "C\x0B" "Are you OK?\xFF" "Y\x16" "C\x11" "Please push below\xFF"
+	 		               "F\x03" "X\x1C" "Y\x39" "T\x02" "No\xFF"
+	                       "F\x03" "X\x7A" "Y\x39" "T\x03" "Yes\xFF"
+	 		               "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
+	 		               "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
+	strcpy(screens[25][0], "F\x02" "Y\x05" "C\x0C" "Push here if\xFF" "Y\x20" "C\x10" "printer supplies\xFF"
+	        		       "Y\x3D" "C\x07" "are low\xFF" "ES");
+	strcpy(screens[26][0], "F\x02" "X\x18" "Y\x0E" "T\x04" "Push\xFF" "X\x08" "Y\x24" "T\x08" "here for\xFF"
+	 		               "X\x16" "Y\x3C" "T\x05" "paper\xFF" "X\x7D" "Y\x0E" "T\x04" "Push\xFF" "X\x6D" "Y\x24"
+	 		               "T\x08" "here for\xFF" "X\x7B" "Y\x3C" "T\x05" "toner\xFF"
+	 		               "X\x02" "Y\x02" "B\x5A\x5C" "X\x03" "Y\x03" "B\x58\x5A"
+	           	  	  	   "X\x68" "Y\x02" "B\x5A\x5C" "X\x69" "Y\x03" "B\x58\x5A"
+	 		               "ES");
+	strcpy(screens[27][0], "F\x02" "X\x18" "Y\x0E" "T\x04" "Push\xFF" "X\x08" "Y\x24" "T\x08" "here for\xFF"
+	  		               "X\x16" "Y\x3C" "T\x05" "black\xFF" "X\x7D" "Y\x0E" "T\x04" "Push\xFF" "X\x6D" "Y\x24"
+	  		               "T\x08" "here for\xFF" "X\x6D" "Y\x3C" "T\x07" "Y/Cy/Mg\xFF"
+	  		               "X\x02" "Y\x02" "B\x5A\x5C" "X\x03" "Y\x03" "B\x58\x5A"
+	            	  	   "X\x68" "Y\x02" "B\x5A\x5C" "X\x69" "Y\x03" "B\x58\x5A"
+	  		               "ES");
+	strcpy(screens[28][0], "F\x02" "Y\x04" "C\x0F" "Low black toner\xFF" "Y\x1A" "C\x08" "reported\xFF"
+	 		               "Y\x30" "C\x12" "Push here if other\xFF" "Y\x46" "C\x14" "printer supplies low\xFF" "ES");
+	for(s=0; s<29; s++)
+		for(i=0; i<128; i++)
+			if(screens[s][0][i] == 0xFF)
+				screens[s][0][i] = 0x00;
+}
 
 #ifdef USE_FULL_ASSERT
 
