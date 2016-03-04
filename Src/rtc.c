@@ -48,6 +48,12 @@ void MX_RTC_Init(void)
   RTC_DateTypeDef sDate;
   RTC_AlarmTypeDef sAlarm;
 
+  /* User code added by PC */
+  /* Enable Power Clock */
+  __HAL_RCC_PWR_CLK_ENABLE();
+  /* Allow Access to RTC Backup domain */
+  HAL_PWR_EnableBkUpAccess();
+
     /**Initialize RTC and set the Time and Date 
     */
   hrtc.Instance = RTC;

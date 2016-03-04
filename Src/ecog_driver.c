@@ -778,7 +778,7 @@ uint8_t ecog_write_screen_data(void)
   //timers_sdelay(150);  // PCX added
 //dprintf("Black\r\n");
   //for(f=0; f<2; f++)
-  for(f=0; f<2; f++)
+  for(f=0; f<4; f++)
   for(y=0;y<96;y++)                                                                     /* Loop for all Y data */
   {
     ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_BLACK);                          /* Scan line of data */
@@ -793,8 +793,11 @@ uint8_t ecog_write_screen_data(void)
   //timers_sdelay(150);  // PCX added
 //
 //
+  ecog_write_inverse(1);
 //dprintf("Normal\r\n");
-  for(f=0; f<4; f++)
+
+  //for(f=0; f<6; f++)   // "Low temp"
+  for(f=0; f<12; f++)   // "Test temp"
   for(y=0;y<96;y++)                                                                     /* Loop for all Y data */
   {
     ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_NORMAL);                         /* Scan line of data */
@@ -1037,18 +1040,22 @@ uint8_t ecog_update_display(uint8_t powered)
   }
 }
 
-uint8_t ecog_write_inverse(void)
+uint8_t ecog_write_inverse(uint8_t powered)
 {
   uint8_t f;                                                                            /* General loop counter */
   uint8_t y;                                                                            /* Y loop counter */
 
-  //UART1_Write_Text("Powering display\r\n");
-  ecog_power_display();                                                                 /* Power up the display */
-  //UART1_Write_Text("Display powered\r\n");
+  if(!powered)
+  {
+	  //UART1_Write_Text("Powering display\r\n");
+	  ecog_power_display();                                                                /* Power up the display */
+	  //UART1_Write_Text("Display powered\r\n");
+  }
   if(ecog_initialise_cog())                                                             /* Initialise COG driver? */
   {
     //UART1_Write_Text("Writing inverse data\r\n");
-    for(f=0; f<3; f++)
+	    //for(f=0; f<3; f++)          // "Low" temp
+	    for(f=0; f<12; f++)            // Test
     	for(y=0;y<96;y++)                                                                     /* Loop for all Y data */
     	{
     		ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_INVERSE);                         /* Scan line of data */
