@@ -85,7 +85,7 @@ extern uint8_t ecog_disable_display(void);
 extern uint8_t ecog_enable_display(void);
 extern uint8_t ecog_display_enabled;
 extern uint8_t ecog_update_display(uint8_t powered);
-uint8_t ecog_write_inverse(void);
+uint8_t ecog_write_inverse(uint8_t powered);
 extern void ecog_plot(int16_t x,int16_t y,uint8_t m);
 extern uint8_t ecog_buffer[];
 extern void ecog_dump(void);
