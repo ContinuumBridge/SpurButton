@@ -89,13 +89,14 @@
 #define  f_ack                0x08
 #define  f_beacon             0x0A
 
+//uint8_t node_id[] = {0x00, 0x00, 0x00, 0x2F};    // Battery
+uint8_t node_id[] = {0x00, 0x00, 0x00, 0x0A};  // Demo
 char screens[MAX_SCREEN][REGIONS][128];
 HAL_StatusTypeDef status;
 int length;
 uint8_t Rx_Buffer[128];
 uint8_t tx_message[64];
 uint8_t tx_length;
-uint8_t node_id[] = {0x00, 0x00, 0x00, 0x2F};
 uint8_t bridge_address[2] = {0xFF, 0xFF};
 uint8_t node_address[2] = {0x00, 0x00};
 uint8_t beacon_address[] = {0xBB, 0xBB};
@@ -109,7 +110,10 @@ uint8_t send_attempt = 0;
 uint8_t sleeping = 0;
 char debug_buff[64] = {0};
 uint8_t config_stored = 0;
+uint8_t override = 0;
 uint8_t stop_mode = 0;
+uint8_t current_screen = 0;
+uint8_t last_action_pressed = 0;
 
 typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
@@ -118,7 +122,7 @@ NodeState         node_state           = initial;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void set_display(uint8_t screen_num);
+void Set_Display(uint8_t screen_num);
 HAL_StatusTypeDef Rx_Message(uint8_t *buffer, int *length, uint16_t timeout);
 static void RTC_TimeShow(void);
 void RTC_Delay(uint32_t delay);
@@ -140,6 +144,7 @@ void Store_Config(void);
 void Load_Normal_Screens(void);
 void Load_Demo_Screens(void);
 static void SYSCLKConfig_STOP(void);
+uint8_t Send_Delay(void);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -198,30 +203,21 @@ int main(void)
   HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_RESET);
 
-  DEBUG_TX("Hello Computer v1\r\n");
+  DEBUG_TX("Hello Computer v2\r\n");
   Load_Normal_Screens();
   ecog_init();
-  set_display(DISPLAY_INITIAL);
-  //ecog_update_display(0);
-
-  /*
-  RTC_TimeShow();
-  RTC_Delay(20);
-  Delay_ms(1000);
-  RTC_Delay(5);
-  RTC_TimeShow();
-  */
+  Set_Display(DISPLAY_INITIAL);
 
   // Set OTA data rate to 1200 bps
-  /*
+  Radio_On();
   RADIO_TXS("ER_CMD#B0", 9);
-  RADIO_RX(buffer, 9, 1);
+  status = Rx_Message(Rx_Buffer, &length, 3000);
   DEBUG_TX("Received: ");
-  DEBUG_TXS(buffer, 9);
+  DEBUG_TXS(Rx_Buffer, 9);
   DEBUG_TX("\r\n");
+  Delay_ms(100);
   RADIO_TXS("ACK", 3);
-  HAL_Delay(200);
-  */
+  Delay_ms(200);
 
   Radio_On();
   RADIO_TXS("Hello World", 11);
@@ -243,7 +239,11 @@ int main(void)
   Radio_Off();
 
   RTC_Delay(10);
-  DEBUG_TX("You should only see this after exit stop mode\r\n");
+  DEBUG_TX("Going into stop mode\r\n");
+  Delay_ms(100);
+  Enable_IRQ();    // Make sure that button is enabled before stopping
+  //stop_mode = 1;
+  //HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
 
   /* USER CODE END 2 */
 
@@ -345,13 +345,14 @@ static void SYSCLKConfig_STOP(void)
   }
 }
 
-void set_display(uint8_t screen_num)
+void Set_Display(uint8_t screen_num)
 {
 	if (ecog_write_inverse(0))
 	{
 		ecog_cls();
 		Build_Screen(screen_num);
 		ecog_update_display(1);
+		current_screen = screen_num;
 	}
 }
 
@@ -366,25 +367,26 @@ void Build_Screen(uint8_t screen_num)
 	uint8_t parsing = 1;
 	uint8_t loops = 0;
 
-	DEBUG_TX("Build_Screen\r\n");
+	sprintf(debug_buff,"Build_Screen %d\r\n", screen_num);
+	DEBUG_TX(debug_buff);
 	while(parsing)
 	{
 		if(strncmp(screens[screen_num][region]+pos, "S", 1) == 0)
 		{
 			pos += 2;
-			DEBUG_TX("Screen\r\n");
+			//DEBUG_TX("Screen\r\n");
 
 		}
 		else if(strncmp(screens[screen_num][region]+pos, "R", 1) == 0)
 		{
 			pos += 2;
-			DEBUG_TX("Region\r\n");
+			//DEBUG_TX("Region\r\n");
 		}
 		else if(strncmp(screens[screen_num][region]+pos, "F", 1) == 0)
 		{
 			pos++; f = screens[screen_num][region][pos]; pos++;
-			sprintf(debug_buff,"Build_Screen, font: %d                             \r\n", f);
-			DEBUG_TX(debug_buff);
+			//sprintf(debug_buff,"Build_Screen, font: %d                             \r\n", f);
+			//DEBUG_TX(debug_buff);
 			switch(f)
 			{
 				case 1:
@@ -398,28 +400,28 @@ void Build_Screen(uint8_t screen_num)
 		else if(strncmp(screens[screen_num][region]+pos, "X", 1) == 0)
 		{
 			pos++; x = screens[screen_num][region][pos]; pos++;
-			sprintf(debug_buff,"Build_Screen, x: %d                             \r\n", x);
-			DEBUG_TX(debug_buff);
+			//sprintf(debug_buff,"Build_Screen, x: %d                             \r\n", x);
+			//DEBUG_TX(debug_buff);
 		}
 		else if(strncmp(screens[screen_num][region]+pos, "Y", 1) == 0)
 		{
 			pos++; y = screens[screen_num][region][pos]; pos++;
-			sprintf(debug_buff,"Build_Screen, y: %d                             \r\n", y);
-			DEBUG_TX(debug_buff);
+			//sprintf(debug_buff,"Build_Screen, y: %d                             \r\n", y);
+			//DEBUG_TX(debug_buff);
 		}
 		else if(strncmp(screens[screen_num][region]+pos, "B", 1) == 0)
 		{
 			pos++; w = screens[screen_num][region][pos]; pos++;
 			h = screens[screen_num][region][pos]; pos++;
-			sprintf(debug_buff,"Build_Screen, box. w: %d, h: %d     \r\n", w, h);
-			DEBUG_TX(debug_buff);
+			//sprintf(debug_buff,"Build_Screen, box. w: %d, h: %d     \r\n", w, h);
+			//DEBUG_TX(debug_buff);
 			ecog_box(x, y, w, h,ECOG_ON);
 		}
 		else if(strncmp(screens[screen_num][region]+pos, "C", 1) == 0)
 		{
 			pos++; len = screens[screen_num][region][pos]; pos++;
-			sprintf(debug_buff,"Build_Screen, centred text, pos: %d, len: %d   \r\n", pos, len);
-			DEBUG_TX(debug_buff);
+			//sprintf(debug_buff,"Build_Screen, centred text, pos: %d, len: %d   \r\n", pos, len);
+			//DEBUG_TX(debug_buff);
 			ecog_printfc(font, y, screens[screen_num][region] + pos);
 			//sprintf(debug_buff,"Build_Screen, text: %20s\r\n", screens[screen_num][region] + pos);
 			//DEBUG_TX(debug_buff);
@@ -431,8 +433,8 @@ void Build_Screen(uint8_t screen_num)
 		{
 			ecog_position(x, y);
 			pos++; len = screens[screen_num][region][pos]; pos++;
-			sprintf(debug_buff,"Build_Screen, text, pos: %d, len: %d   \r\n", pos, len);
-			DEBUG_TX(debug_buff);
+			//sprintf(debug_buff,"Build_Screen, text, pos: %d, len: %d   \r\n", pos, len);
+			//DEBUG_TX(debug_buff);
 			ecog_printf(font, screens[screen_num][region] + pos);
 			//sprintf(debug_buff,"Build_Screen, text: %20s\r\n", screens[screen_num][region] + pos);
 			//DEBUG_TX(debug_buff);
@@ -442,25 +444,25 @@ void Build_Screen(uint8_t screen_num)
 		}
 		else if(strncmp(screens[screen_num][region]+pos, "E", 1) == 0)
 		{
-			DEBUG_TX("Build_Screen found E\r\n");
+			//DEBUG_TX("Build_Screen found E\r\n");
 			pos++;
 			if(strncmp(screens[screen_num][region]+pos, "R", 1) == 0)
 			{
 				pos++; region++;
 				loops = 0;
-				DEBUG_TX("Build_Screen end region\r\n");
+				//DEBUG_TX("Build_Screen end region\r\n");
 			}
 			else if(strncmp(screens[screen_num][region]+pos, "S", 1) == 0)
 			{
 				parsing = 0;
-				DEBUG_TX("Build_Screen end screen\r\n");
+				//DEBUG_TX("Build_Screen end screen\r\n");
 			}
         }
 		loops++;
 		if(loops >127)
 		{
 			parsing = 0;
-			DEBUG_TX("Build_Screen did not find end of screen\r\n");
+			//DEBUG_TX("Build_Screen did not find end of screen\r\n");
 		}
 	}
 }
@@ -498,6 +500,7 @@ void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin)
 			else
 			{
 				button_press_time = Cbr_Now();
+				last_action_pressed = 1;
 				DEBUG_TX( "Button 3 pressed: \r\n" );
 			}
 		}
@@ -513,8 +516,12 @@ void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin)
 			{
 				HAL_NVIC_DisableIRQ(EXTI3_IRQn);
 				now = Cbr_Now();
-				pressed_time = now - button_press_time;
+				if(last_action_pressed)
+					pressed_time = now - button_press_time;
+				else
+					pressed_time = 1;   // In case a down-press was missed. This gives most transparent result
 				button_press_time = now;
+				last_action_pressed = 0;
 				button_pressed = 1;
 				DEBUG_TX( "Button 3 released: \r\n" );
 			}
@@ -530,7 +537,7 @@ void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin)
 		{
 			Load_Normal_Screens();
 			ecog_init();
-			set_display(DISPLAY_INITIAL);
+			Set_Display(DISPLAY_INITIAL);
 			Enable_IRQ();
 			node_state = initial;
 		}
@@ -547,30 +554,36 @@ void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin)
 				Radio_Off();
 				Enable_IRQ();
 				Load_Demo_Screens();
+				Set_Display(0);
 				node_state = demo;
+				stop_mode = 1;
+				HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
 			}
 		}
 		else if(node_state == normal)
 		{
 			DEBUG_TX("node_state normal pressed\r\n");
-			set_display(DISPLAY_PRESSED);
+			if(override)
+				Set_Display(DISPLAY_OVERRIDE);
+			else
+				Set_Display(DISPLAY_PRESSED);
+			node_state = pressed;
+			Enable_IRQ();
 			alert_id[0] = 0x00; alert_id[1] = 0x00;
 			DEBUG_TX("Sending pressed alert\r\n");
 			Send_Message(f_alert, 2, alert_id, 1);
-			DEBUG_TX("Sent pressed alert\r\n");
-			node_state = pressed;
-			Enable_IRQ();
 		}
 		else if(node_state == pressed)
 		{
 			DEBUG_TX("node_state pressed\r\n");
 			if (pressed_time > T_REVERT_PRESS)
 			{
-				set_display(DISPLAY_NORMAL);
+				Set_Display(DISPLAY_NORMAL);
 				alert_id[0] = 0x01; alert_id[1] = 0x00;
 				DEBUG_TX("Sending cleared alert\r\n");
 				Send_Message(f_alert, 2, alert_id, 1);
 				DEBUG_TX("Sent cleared alert\r\n");
+				override = 0;
 				node_state = normal;
 				Enable_IRQ();
 			}
@@ -584,22 +597,28 @@ void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin)
 				screen_num++;
 			if (screen_num == MAX_SCREEN)
 				screen_num = 0;
-			set_display(screen_num);
+			Set_Display(screen_num);
 			if ((screen_num == 9) | (screen_num == 16) | (screen_num == 23))
 			{
 				Delay_ms(2500);
 				screen_num++;
-				set_display(screen_num);
+				Set_Display(screen_num);
 			}
-			Enable_IRQ();
+			Enable_IRQ();    // Make sure that button is enabled before stopping
+			stop_mode = 1;
+			HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
 		}
 		else
-			Enable_IRQ();
-  }
-  else
-  {
-    DEBUG_TX( "Other button pressed: \r\n" );
-  }
+		{
+			Enable_IRQ();    // Make sure that button is enabled before stopping
+			stop_mode = 1;
+			HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+		}
+	}
+	else
+	{
+		DEBUG_TX( "Other button pressed: \r\n" );
+	}
 }
 
 void Enable_IRQ(void)
@@ -620,12 +639,12 @@ void Network_Include(void)
 	DEBUG_TX("Network_Include\r\n");
 	if(include_state == 0)
 	{
-		set_display(DISPLAY_CONNECTING);
+		Set_Display(DISPLAY_CONNECTING);
 		include_state = 1;
 	}
 	else if(include_state == 1)
 	{
-		set_display(DISPLAY_PROBLEM);
+		Set_Display(DISPLAY_PROBLEM);
 		include_state = 2;
 	}
 	Radio_On();
@@ -669,12 +688,13 @@ void Network_Include(void)
 	}
 	uint8_t data[] = {0x00, 0x00};
 	Send_Message(f_ack, 0, data, 0);
-	Send_Message(f_woken_up, 0, data, 1);
-	set_display(DISPLAY_NORMAL);
-	Radio_Off();
-	Enable_IRQ();
+	DEBUG_TX("Sent ack for grant\r\n");
 	include_state = 0;
 	node_state = normal;
+	Set_Display(DISPLAY_NORMAL);
+	Enable_IRQ();
+	DEBUG_TX("Sending woken_up after grant\r\n");
+	Send_Message(f_woken_up, 0, data, 1);
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
@@ -702,9 +722,9 @@ void Radio_Tx_IT(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size
 	{
 		DEBUG_TX("Radio Tx Error\r\n");
 	}
-	//while (radio_ready != SET)
-	//{
-	//}
+	while (radio_ready != SET)
+	{
+	}
 }
 
 void Radio_Tx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size)
@@ -737,7 +757,7 @@ void Radio_On(void)
 {
 	DEBUG_TX("Radio_On\r\n");
     HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_SET);
-    Delay_ms(500);
+    Delay_ms(1000);
 }
 
 void Radio_Off(void)
@@ -780,6 +800,7 @@ void Manage_Send(uint8_t ack)
 	if(Message_Search(beacon_address, Rx_Buffer) == SEARCH_OK)
 	{
 		DEBUG_TX("Manage_Send found beacon\r\n");
+		Send_Delay();
 		RADIO_TXS(tx_message, tx_length);
 		DEBUG_TX("Manage_Send sent message\r\n");
 	}
@@ -831,6 +852,10 @@ void Manage_Send(uint8_t ack)
 			}
 		}
 	}
+	else        // Don't wait for an ack, but give time for message to be sent
+	{
+		Delay_ms(200);
+	}
 }
 
 void Listen_Radio(void)
@@ -868,6 +893,7 @@ void Set_Wakeup(uint8_t force_awake)
 	DEBUG_TX("Set_Wakeup\r\n");
 	if(force_awake)
 	{
+		DEBUG_TX("Set_Wakeup, force_awake\r\n");
 		Listen_Radio();
 	}
 	else
@@ -876,9 +902,14 @@ void Set_Wakeup(uint8_t force_awake)
 		if(wakeup > ONE_DAY)
 			wakeup = ONE_DAY;
 		if(wakeup == 0)
+		{
+			DEBUG_TX("Set_Wakeup, calling Listen_Radio\r\n");
 			Listen_Radio();
+		}
 		else
 		{
+			sprintf(debug_buff, "Set_Wakeup for %d\r\n", (int)wakeup);
+			DEBUG_TX(debug_buff);
 			Radio_Off();
 			sleeping = 1;
 			RTC_Delay(wakeup);
@@ -899,26 +930,52 @@ void Store_Config(void)
 {
 	uint8_t s, r, i = 0;
 	uint8_t pos = 12;
+	uint8_t old_override = 0;
 	if(strncmp(Rx_Buffer+pos, "S", 1) == 0)
-		s = Rx_Buffer[pos+1];
-	if(strncmp(Rx_Buffer+pos+2, "R", 1) == 0)
-		r = Rx_Buffer[pos+3];
-	sprintf(debug_buff, "Screen: %d, region: %d\r\n", s, r);
-	DEBUG_TX(debug_buff);
-	for(i=0; i<64; i++)
-		debug_buff[i] = 0;
-	for(i=0; i<Rx_Buffer[5]; i++)
 	{
-		screens[s][r][i] = Rx_Buffer[i+pos+4];
-		//sprintf(debug_buff, "%c", screens[s][r][i]);
+		s = Rx_Buffer[pos+1];
+		if(strncmp(Rx_Buffer+pos+2, "R", 1) == 0)
+			r = Rx_Buffer[pos+3];
+		sprintf(debug_buff, "Screen: %d, region: %d\r\n", s, r);
+		DEBUG_TX(debug_buff);
+		for(i=0; i<64; i++)
+			debug_buff[i] = 0;
+		for(i=0; i<Rx_Buffer[5]; i++)
+		{
+			screens[s][r][i] = Rx_Buffer[i+pos+4];
+			//sprintf(debug_buff, "%c", screens[s][r][i]);
+			//DEBUG_TX(debug_buff);
+		}
+		//DEBUG_TX("\r\n");
+		//sprintf(debug_buff, "Store_Config, screen: %d, reg: %d, %02x %02x %02x %02x %02x %02x\r\n", s, r, screens[s][r][0], screens[s][r][1], screens[s][r][2], screens[s][r][3], screens[s][r][4], screens[s][r][5]);
 		//DEBUG_TX(debug_buff);
+		config_stored++;
+		sprintf(debug_buff, "Store_Config, config_stored: %d\r\n", config_stored);
+		DEBUG_TX(debug_buff);
+		if(s == current_screen)
+		{
+			DEBUG_TX("Store_Config. Current screen updated\r\n");
+			Set_Display(current_screen);
+		}
 	}
-	//DEBUG_TX("\r\n");
-	//sprintf(debug_buff, "Store_Config, screen: %d, reg: %d, %02x %02x %02x %02x %02x %02x\r\n", s, r, screens[s][r][0], screens[s][r][1], screens[s][r][2], screens[s][r][3], screens[s][r][4], screens[s][r][5]);
-	//DEBUG_TX(debug_buff);
-	config_stored++;
-	sprintf(debug_buff, "Store_Config, config_stored: %d\r\n", config_stored);
-	DEBUG_TX(debug_buff);
+	else if(strncmp(Rx_Buffer+pos, "C", 1) == 0)
+	{
+		old_override = override;
+		override = Rx_Buffer[pos+1];
+		sprintf(debug_buff, "Override updated:%d\r\n", override);
+		DEBUG_TX(debug_buff);
+		if(override != old_override)
+			if(override)
+			{
+				Set_Display(DISPLAY_OVERRIDE);
+				node_state = pressed;
+			}
+			else
+			{
+				Set_Display(DISPLAY_NORMAL);
+				node_state = normal;
+			}
+	}
 }
 
 uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer)
@@ -926,10 +983,10 @@ uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer)
 	int search_start = Cbr_Now();
 	sprintf(debug_buff, "Message_Search, address: %02x %02x\r\n", address[0], address[1]);
 	DEBUG_TX(debug_buff);
-	__HAL_UART_FLUSH_DRREGISTER(&huart3);
 	while (1)
 	{
-		status = Rx_Message(Rx_Buffer, &length, 6000);
+		__HAL_UART_FLUSH_DRREGISTER(&huart3);
+		status = Rx_Message(Rx_Buffer, &length, 4100);
 		if (status == HAL_OK)
 		{
 			sprintf(debug_buff, "MS Rx: %02x %02x %02x %02x %02x %02x, Length: %d\r\n", Rx_Buffer[0], Rx_Buffer[1], Rx_Buffer[2], Rx_Buffer[3], Rx_Buffer[4], Rx_Buffer[5], length);
@@ -1009,6 +1066,19 @@ void RTC_TimeShow(void)
   /* Display time Format : hh:mm:ss */
   sprintf(debug_buff,"%02d:%02d:%02d\r\n",stimestructureget.Hours, stimestructureget.Minutes, stimestructureget.Seconds);
   DEBUG_TX(debug_buff);
+}
+
+uint8_t Send_Delay(void)
+{
+	/*
+	At 1 Kbps it takes 16*8 = 128 ms to send a message, but there is overhead,
+	so assume 4 messages per second = 10 in the 2 seconds available in the frame.
+	We need a number between 0 and 7 for the delay, x 250 ms.
+	*/
+	uint32_t delay = (Cbr_Now() & 0x7) * 250;
+	sprintf(debug_buff,"Send_Delay: %d\r\n", (int)delay);
+	DEBUG_TX(debug_buff);
+	Delay_ms(delay);
 }
 
 uint32_t Cbr_Now(void)
@@ -1097,14 +1167,14 @@ void Load_Normal_Screens(void)
 	int i, s;
 	strcpy(screens[0][0], "F\x02" "Y\x04" "C\x0F" "Welcome to Spur\xFF" "Y\x1A" "C\x0F" "Push here for 3\xFF"
 			              "Y\x30" "C\x12" "seconds to connect\xFF" "Y\x46" "C\x0A" "to network\xFF" "ES");
-	strcpy(screens[1][0], "F\x02" "Y\x05" "C\x11" "Trying to connect\xFF" "Y\x20" "C\x0A" "to network\xFF" "Y\x3D"
+	strcpy(screens[1][0], "F\x03" "Y\x05" "C\x0A" "Connecting\xFF" "Y\x20" "C\x0A" "to network\xFF" "Y\x3D"
 			              "C\x0B" "Please wait\xFF" "ES");
-	strcpy(screens[2][0], "F\x02" "Y\x10" "C\x15" "Communication problem\xFF" "Y\x32" "C\x11"
-			              "Button not in use\xFF" "ES");
-	strcpy(screens[4][0], "F\x02" "Y\x05" "C\x07" "Default\xFF" "Y\x20" "C\x06" "normal\xFF" "Y\x3D"
-			              "C\x06" "screen\xFF" "ES");
-	strcpy(screens[5][0], "F\x02" "Y\x05" "C\x07" "Default\xFF" "Y\x20" "C\x06" "pushed\xFF" "Y\x3D"
-			              "C\x06" "screen\xFF" "ES");
+	strcpy(screens[2][0], "F\x03" "Y\x05" "C\x0D" "Communication\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
+			              "C\x0A" "Not in use\xFF" "ES");
+	strcpy(screens[4][0], "F\x02" "Y\x05" "C\x09" "Connected\xFF" "Y\x20" "C\x0B" "Configuring\xFF" "Y\x3D"
+			              "C\x0B" "Please wait\xFF" "ES");
+	strcpy(screens[5][0], "F\x03" "Y\x05" "C\x0B" "Configuring\xFF" "Y\x20" "C\x0B" "definitions\xFF" "Y\x3D"
+			              "C\x0B" "Please wait\xFF" "ES");
 	for(s=0; s<6; s++)
 		for(i=0; i<128; i++)
 			if(screens[s][0][i] == 0xFF)
@@ -1164,10 +1234,10 @@ void Load_Demo_Screens(void)
 	      		           "Y\x3D" "C\x0F" "coffee capsules\xFF" "ES");
 	strcpy(screens[21][0], "F\x02" "Y\x05" "C\x0B" "More coffee\xFF" "Y\x20" "C\x0D" "capsules have\xFF"
 	      		           "Y\x3D" "C\x0E" "been requested\xFF" "ES");
-	strcpy(screens[22][0], "F\x02" "Y\x05" "C\x0C" "Push here if\xFF" "Y\x20" "C\x10" "you want someone\xFF"
-	       		           "Y\x3D" "C\x12" "to come to see you\xFF" "ES");
+	strcpy(screens[22][0], "F\x02" "Y\x05" "C\x0C" "Push here if\xFF" "Y\x20" "C\x10" "you want a carer\xFF"
+	       		           "Y\x3D" "C\x0C" "to visit you\xFF" "ES");
 	strcpy(screens[23][0], "F\x03" "Y\x10" "C\x0C" "Your request\xFF" "Y\x32" "C\x0D" "has been sent\xFF" "ES");
-	strcpy(screens[24][0], "F\x02" "Y\x05" "C\x0C" "Someone will\xFF" "Y\x20" "C\x11" "visit you between\xFF"
+	strcpy(screens[24][0], "F\x02" "Y\x05" "C\x0C" "A carer will\xFF" "Y\x20" "C\x11" "visit you between\xFF"
 	         		       "Y\x3D" "C\x0F" "11:00 and 12:00\xFF" "ES");
 	strcpy(screens[25][0], "F\x02" "Y\2" "C\x0B" "Are you OK?\xFF" "Y\x16" "C\x11" "Please push below\xFF"
 	 		               "F\x03" "X\x1C" "Y\x39" "T\x02" "No\xFF"

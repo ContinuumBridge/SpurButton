@@ -39,6 +39,7 @@
   (TYPE *)array_concat((const void *)(A), (An), (const void *)(B), (Bn), sizeof(TYPE));
 #define DEBUG_TX(MESSAGE)  (Debug_Tx(&huart1, (uint8_t*)MESSAGE, (COUNTOF(MESSAGE) - 1)))
 #define RADIO_TXS(MESSAGE, LENGTH)  (Radio_Tx(&huart3, (uint8_t*)MESSAGE, LENGTH))
+#define RADIO_TXIT(MESSAGE, LENGTH)  (Radio_Tx_IT(&huart3, (uint8_t*)MESSAGE, LENGTH))
 #define DEBUG_TXS(MESSAGE, LENGTH)  (Debug_Tx(&huart1, (uint8_t*)MESSAGE, LENGTH))
 #define DEBUG_RX(MESSAGE, LENGTH)  (UART_Rx_IT(&huart1, (uint8_t*)MESSAGE, LENGTH))
 #define RADIO_RXIT(MESSAGE, LENGTH)  (Radio_Rx_IT(&huart3, (uint8_t*)MESSAGE, LENGTH))
@@ -52,6 +53,7 @@ void *array_concat(const void *a, size_t an, const void *b, size_t bn, size_t s)
 void Radio_Tx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size);
 void Debug_Tx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size);
 void Radio_Rx_IT(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size);
+void Radio_Tx_IT(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size);
 uint16_t Radio_Rx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size, uint16_t timeout);
 
 void DWT_Init(void);

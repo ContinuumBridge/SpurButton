@@ -1055,11 +1055,14 @@ uint8_t ecog_write_inverse(uint8_t powered)
   {
     //UART1_Write_Text("Writing inverse data\r\n");
 	    //for(f=0; f<3; f++)          // "Low" temp
-	    for(f=0; f<12; f++)            // Test
+	  	//DEBUG_TX("Starting to init screen\r\n");
+	    for(f=0; f<3; f++)            // Test
+	    {
     	for(y=0;y<96;y++)                                                                     /* Loop for all Y data */
     	{
     		ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_INVERSE);                         /* Scan line of data */
     	}
+	    }
   }
   else
   {

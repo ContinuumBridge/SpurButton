@@ -164,3 +164,4 @@ uint16_t SPI_TxRx(SPI_HandleTypeDef *hspi, uint8_t *aTxBuffer, uint8_t *aRxBuffe
 	}
 	return 0;
 }
+
