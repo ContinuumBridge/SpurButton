@@ -59,6 +59,7 @@
 #define FONT_2 Arial_Rounded_MT_Bold19x20
 //#define FONT_2 Arial_Narrow16x20
 #define FONT_3 Arial_Rounded_MT_Bold26x27
+
 #define DISPLAY_INITIAL 0
 #define DISPLAY_CONNECTING 1
 #define DISPLAY_PROBLEM 2
@@ -71,8 +72,10 @@
 #define SEARCH_ERROR 2
 #define SEND_OK 0
 #define SEND_TIMEOUT 1
-#define MAX_SEARCH_TIME 30
+#define MAX_SEARCH_TIME 6
 #define ONE_DAY (24*60*60)
+#define T_LONG_PRESS          2
+#define T_RESET_PRESS         8
 
 #define MAX_SCREEN 32
 #define REGIONS 2
@@ -89,8 +92,20 @@
 #define  f_ack                0x08
 #define  f_beacon             0x0A
 
+#define LEFT_SIDE			  0
+#define RIGHT_SIDE			  1
+#define PRESS_LEFT_SHORT	  0
+#define PRESS_RIGHT_SHORT     1
+#define PRESS_LEFT_LONG		  2
+#define PRESS_RIGHT_LONG      3
+#define PRESS_LEFT_DOUBLE     4
+#define PRESS_RIGHT_DOUBLE    5
+#define PRESS_RESET           6
+#define PRESS_NONE            7
+
 //uint8_t node_id[] = {0x00, 0x00, 0x00, 0x2F};    // Battery
 uint8_t node_id[] = {0x00, 0x00, 0x00, 0x0A};  // Demo
+//uint8_t node_id[] = {0x00, 0x00, 0x00, 0x10};  // Demo A
 char screens[MAX_SCREEN][REGIONS][128];
 HAL_StatusTypeDef status;
 int length;
@@ -113,7 +128,6 @@ uint8_t config_stored = 0;
 uint8_t override = 0;
 uint8_t stop_mode = 0;
 uint8_t current_screen = 0;
-uint8_t last_action_pressed = 0;
 
 typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
@@ -144,7 +158,9 @@ void Store_Config(void);
 void Load_Normal_Screens(void);
 void Load_Demo_Screens(void);
 static void SYSCLKConfig_STOP(void);
-uint8_t Send_Delay(void);
+static void SystemPower_Config(void);
+void Send_Delay(void);
+void Power_Down(void);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -169,6 +185,7 @@ int main(void)
 
   /* Configure the system clock */
   SystemClock_Config();
+  SystemPower_Config();
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
@@ -188,7 +205,6 @@ int main(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_VERY_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  HAL_GPIO_WritePin(GPIOB, BORDER_CONTROL_Pin, GPIO_PIN_SET);
   HAL_GPIO_WritePin(GPIOB, DISPLAY_ON_PB6_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(GPIOB, _RESET_DISPLAY_Pin, GPIO_PIN_SET);
   Delay_ms(5);
@@ -199,17 +215,52 @@ int main(void)
 
   HAL_GPIO_WritePin(_SPI_CS_GPIO_Port, _SPI_CS_Pin, GPIO_PIN_SET);
   HAL_GPIO_WritePin(GPIOB, DISPLAY_DISCHARGE_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, DISPLAY_PWM_Pin, GPIO_PIN_RESET);
 
   HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
+  HAL_ADC_MspDeInit(&hadc);
+  GPIO_InitStruct.Pin = BATT_VOLTAGE_Pin|DISPLAY_TEMP_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   DEBUG_TX("Hello Computer v2\r\n");
   Load_Normal_Screens();
   ecog_init();
   Set_Display(DISPLAY_INITIAL);
 
-  // Set OTA data rate to 1200 bps
   Radio_On();
+  /*
+   RADIO_TXS("ER_CMD#D0", 9);
+   status = Rx_Message(Rx_Buffer, &length, 3000);
+   DEBUG_TX("Received: ");
+   DEBUG_TXS(Rx_Buffer, 9);
+   DEBUG_TX("\r\n");
+   Delay_ms(100);
+   RADIO_TXS("ACK", 3);
+   Delay_ms(200);
+   RADIO_TXS("ER_CMD#d0", 9);
+   status = Rx_Message(Rx_Buffer, &length, 3000);
+   DEBUG_TX("Received: ");
+   DEBUG_TXS(Rx_Buffer, 9);
+   DEBUG_TX("\r\n");
+   Delay_ms(100);
+   RADIO_TXS("ACK", 3);
+   Delay_ms(200);
+  */
+  // Reset radio
+  RADIO_TXS("ER_CMD#R0", 9);
+  status = Rx_Message(Rx_Buffer, &length, 3000);
+  DEBUG_TX("Received: ");
+  DEBUG_TXS(Rx_Buffer, 9);
+  DEBUG_TX("\r\n");
+  Delay_ms(100);
+  RADIO_TXS("ACK", 3);
+  Delay_ms(200);
+
+  // Set OTA data rate to 1200 bps
   RADIO_TXS("ER_CMD#B0", 9);
   status = Rx_Message(Rx_Buffer, &length, 3000);
   DEBUG_TX("Received: ");
@@ -238,13 +289,10 @@ int main(void)
   	  DEBUG_TX("Receive problem\r\n");
   Radio_Off();
 
-  RTC_Delay(10);
   DEBUG_TX("Going into stop mode\r\n");
   Delay_ms(100);
   Enable_IRQ();    // Make sure that button is enabled before stopping
-  //stop_mode = 1;
-  //HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
-
+  Power_Down();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -344,6 +392,43 @@ static void SYSCLKConfig_STOP(void)
 	  DEBUG_TX("Sysclock restart error 2\r\n");
   }
 }
+
+static void SystemPower_Config(void)
+{
+  GPIO_InitTypeDef GPIO_InitStructure = {0};
+  /* Enable Ultra low power mode */
+  HAL_PWREx_EnableUltraLowPower();
+  /* Enable the fast wake up from Ultra low power mode */
+  HAL_PWREx_EnableFastWakeUp();
+  /* Enable GPIOs clock */
+  /*
+   __HAL_RCC_GPIOA_CLK_ENABLE();
+   __HAL_RCC_GPIOB_CLK_ENABLE();
+   __HAL_RCC_GPIOC_CLK_ENABLE();
+   __HAL_RCC_GPIOD_CLK_ENABLE();
+   __HAL_RCC_GPIOH_CLK_ENABLE();
+   */
+   /* Configure all GPIO port pins in Analog Input mode (floating input trigger OFF) */
+  /*
+   GPIO_InitStructure.Pin = GPIO_PIN_All;
+   GPIO_InitStructure.Mode = GPIO_MODE_ANALOG;
+   GPIO_InitStructure.Pull = GPIO_NOPULL;
+   HAL_GPIO_Init(GPIOA, &GPIO_InitStructure);
+   HAL_GPIO_Init(GPIOB, &GPIO_InitStructure);
+   HAL_GPIO_Init(GPIOC, &GPIO_InitStructure);
+   HAL_GPIO_Init(GPIOD, &GPIO_InitStructure);
+   HAL_GPIO_Init(GPIOH, &GPIO_InitStructure);
+   */
+   /* Disable GPIOs clock */
+  /*
+   __HAL_RCC_GPIOA_CLK_DISABLE();
+   __HAL_RCC_GPIOB_CLK_DISABLE();
+   __HAL_RCC_GPIOC_CLK_DISABLE();
+   __HAL_RCC_GPIOD_CLK_DISABLE();
+   __HAL_RCC_GPIOH_CLK_DISABLE();
+   */
+}
+
 
 void Set_Display(uint8_t screen_num)
 {
@@ -467,13 +552,117 @@ void Build_Screen(uint8_t screen_num)
 	}
 }
 
-void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin)
+uint8_t On_Button_Press(uint16_t GPIO_Pin)
 {
-	static uint32_t button_press_time = 0;
-	uint32_t pressed_time = 0;
-	uint32_t now;
-	int button_pressed = 0;
+	int side;
 	GPIO_PinState  button_state;
+	static uint32_t button_press_time[2] = {0, 0};
+	static uint8_t last_action_pressed[2] = {0, 0};
+	uint32_t pressed_time = 0;
+	uint8_t button_pressed = 0;
+	uint32_t now;
+	int i;
+
+	if (GPIO_Pin == PUSH_RIGHT_Pin)
+	{
+		side = RIGHT_SIDE;
+		sprintf(debug_buff,"Right button event: %d\r\n", (int)Cbr_Now());
+		DEBUG_TX(debug_buff);
+	}
+	else if (GPIO_Pin == LEFT_PUSH_Pin)
+	{
+		side = LEFT_SIDE;
+		sprintf(debug_buff,"Left button event: %d\r\n", (int)Cbr_Now());
+		DEBUG_TX(debug_buff);
+	}
+	else
+	{
+		DEBUG_TX("Unknown button event\r\n");
+		return PRESS_NONE;
+	}
+	button_state = HAL_GPIO_ReadPin(GPIOA, GPIO_Pin);
+	if (button_state == GPIO_PIN_RESET)
+	{
+		Delay_ms(100);  // Debounce
+		if (HAL_GPIO_ReadPin(GPIOA, GPIO_Pin) == GPIO_PIN_SET)
+		{
+			DEBUG_TX( "Returning from pressed\r\n" );
+			return PRESS_NONE;
+		}
+		else
+		{
+			button_press_time[side] = Cbr_Now();
+			last_action_pressed[side] = 1;
+			return PRESS_NONE;
+		}
+	}
+	else if (button_state == GPIO_PIN_SET)
+	{
+		Delay_ms(100);  // Debounce
+		if (HAL_GPIO_ReadPin(GPIOA, GPIO_Pin) == GPIO_PIN_RESET)
+		{
+			DEBUG_TX( "Returning from released\r\n" );
+			return PRESS_NONE;
+		}
+		else
+		{
+			HAL_NVIC_DisableIRQ(EXTI3_IRQn);
+			HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
+			now = Cbr_Now();
+			if(last_action_pressed[side])
+				pressed_time = now - button_press_time[side];
+			else
+				pressed_time = 1;   // In case a down-press was missed. This gives most transparent result
+			for(i=0; i<2; i++)
+			{
+				button_press_time[i] = now;
+				last_action_pressed[i] = 0;
+			}
+			button_pressed = 1;
+			DEBUG_TX( "Button released: \r\n" );
+		}
+	}
+	if(button_pressed)
+	{
+		button_pressed = 0;
+		if (pressed_time > T_RESET_PRESS)
+		{
+			DEBUG_TX( "Reset press\r\n");
+			return PRESS_RESET;
+		}
+		else if(pressed_time > T_LONG_PRESS)
+		{
+			if(side == LEFT_SIDE)
+			{
+				DEBUG_TX( "Left long press\r\n" );
+				return PRESS_LEFT_LONG;
+			}
+			else
+			{
+				DEBUG_TX( "Right long press\r\n" );
+				return PRESS_RIGHT_LONG;
+			}
+		}
+		else
+		{
+			if(side == LEFT_SIDE)
+			{
+				DEBUG_TX( "Left short press\r\n" );
+				return PRESS_LEFT_SHORT;
+			}
+			else
+			{
+				DEBUG_TX( "Right short press\r\n" );
+				return PRESS_RIGHT_SHORT;
+			}
+		}
+	}
+	return PRESS_NONE; // Should not ever get here, but just in case
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+	uint8_t button_press;
 	uint8_t alert_id[] = {0x00, 0x00};
 
     /* Configures system clock after wake-up from STOP: enable HSE, PLL and select
@@ -481,155 +670,157 @@ void HAL_GPIO_EXTI_Callback( uint16_t GPIO_Pin)
 	if(stop_mode)
 	{
 		SYSCLKConfig_STOP();
+		//HAL_ResumeTick();
 		stop_mode = 0;
 	}
+	button_press = On_Button_Press(GPIO_Pin);
 
-	if (GPIO_Pin == GPIO_PIN_3)
+	if (button_press == PRESS_NONE)
 	{
-		button_state = HAL_GPIO_ReadPin(USER_INPUT_GPIO_Port, USER_INPUT_Pin);
-		sprintf(debug_buff,"Button 3 event: %d                             \r\n", (int)Cbr_Now());
-		DEBUG_TX(debug_buff);
-		if (button_state == GPIO_PIN_RESET)
+		Power_Down();
+		return;
+	}
+	else if (button_press == PRESS_RESET)
+	{
+		DEBUG_TX("System Reset");
+		NVIC_SystemReset();
+		/*
+		Load_Normal_Screens();
+		ecog_init();
+		Set_Display(DISPLAY_INITIAL);
+		Enable_IRQ();
+		node_state = initial;
+		Power_Down();
+		*/
+	}
+	else if (node_state == initial)
+	{
+		DEBUG_TX("node_state is initial\r\n");
+		if ((button_press == PRESS_RIGHT_LONG) | (button_press == PRESS_LEFT_LONG))
 		{
-			Delay_ms(100);  // Debounce
-			if (HAL_GPIO_ReadPin(USER_INPUT_GPIO_Port, USER_INPUT_Pin) == GPIO_PIN_SET)
-			{
-				DEBUG_TX( "Returning from pressed\r\n" );
-				return;
-			}
-			else
-			{
-				button_press_time = Cbr_Now();
-				last_action_pressed = 1;
-				DEBUG_TX( "Button 3 pressed: \r\n" );
-			}
+			Network_Include();
 		}
-		else if (button_state == GPIO_PIN_SET)
+		else
 		{
-			Delay_ms(100);  // Debounce
-			if (HAL_GPIO_ReadPin(USER_INPUT_GPIO_Port, USER_INPUT_Pin) == GPIO_PIN_RESET)
-			{
-				DEBUG_TX( "Returning from released\r\n" );
-				return;
-			}
-			else
-			{
-				HAL_NVIC_DisableIRQ(EXTI3_IRQn);
-				now = Cbr_Now();
-				if(last_action_pressed)
-					pressed_time = now - button_press_time;
-				else
-					pressed_time = 1;   // In case a down-press was missed. This gives most transparent result
-				button_press_time = now;
-				last_action_pressed = 0;
-				button_pressed = 1;
-				DEBUG_TX( "Button 3 released: \r\n" );
-			}
-		}
-
-		if (!button_pressed)
+			DEBUG_TX("Starting demo mode\r\n");
+			Radio_Off();
+			Enable_IRQ();
+			Load_Demo_Screens();
+			Set_Display(0);
+			node_state = demo;
+			Power_Down();
 			return;
+		}
+	}
+	else if(node_state == normal)
+	{
+		DEBUG_TX("node_state normal pressed\r\n");
+		if(override)
+			Set_Display(DISPLAY_OVERRIDE);
 		else
-			button_pressed = 0;
-		sprintf(debug_buff,"Pressed time: %d\r\n", (int)pressed_time);
-		DEBUG_TX(debug_buff);
-		if (pressed_time > T_RESET_PRESS)
+			Set_Display(DISPLAY_PRESSED);
+		node_state = pressed;
+		Enable_IRQ();
+		if(button_press == PRESS_LEFT_SHORT)
 		{
-			Load_Normal_Screens();
-			ecog_init();
-			Set_Display(DISPLAY_INITIAL);
-			Enable_IRQ();
-			node_state = initial;
-		}
-		else if (node_state == initial)
-		{
-			DEBUG_TX("node_state is initial\r\n");
-			if (pressed_time > T_START_PRESS)
-			{
-				Network_Include();
-			}
-			else
-			{
-				DEBUG_TX("Starting demo mode\r\n");
-				Radio_Off();
-				Enable_IRQ();
-				Load_Demo_Screens();
-				Set_Display(0);
-				node_state = demo;
-				stop_mode = 1;
-				HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
-			}
-		}
-		else if(node_state == normal)
-		{
-			DEBUG_TX("node_state normal pressed\r\n");
-			if(override)
-				Set_Display(DISPLAY_OVERRIDE);
-			else
-				Set_Display(DISPLAY_PRESSED);
-			node_state = pressed;
-			Enable_IRQ();
 			alert_id[0] = 0x00; alert_id[1] = 0x00;
-			DEBUG_TX("Sending pressed alert\r\n");
-			Send_Message(f_alert, 2, alert_id, 1);
 		}
-		else if(node_state == pressed)
+		else if(button_press == PRESS_RIGHT_SHORT)
 		{
-			DEBUG_TX("node_state pressed\r\n");
-			if (pressed_time > T_REVERT_PRESS)
+			alert_id[0] = 0x00; alert_id[1] = 0x01;
+		}
+		DEBUG_TX("Sending pressed alert\r\n");
+		Send_Message(f_alert, 2, alert_id, 1);
+		Power_Down();
+		return;
+	}
+	else if(node_state == pressed)
+	{
+		DEBUG_TX("node_state pressed\r\n");
+		if ((button_press == PRESS_RIGHT_LONG) | (button_press == PRESS_LEFT_LONG))
+		{
+			Set_Display(DISPLAY_NORMAL);
+			if(button_press == PRESS_LEFT_LONG)
 			{
-				Set_Display(DISPLAY_NORMAL);
 				alert_id[0] = 0x01; alert_id[1] = 0x00;
-				DEBUG_TX("Sending cleared alert\r\n");
-				Send_Message(f_alert, 2, alert_id, 1);
-				DEBUG_TX("Sent cleared alert\r\n");
-				override = 0;
-				node_state = normal;
-				Enable_IRQ();
 			}
+			else if(button_press == PRESS_RIGHT_LONG)
+			{
+				alert_id[0] = 0x01; alert_id[1] = 0x01;
+			}
+			alert_id[0] = 0x01; alert_id[1] = 0x00;
+			DEBUG_TX("Sending cleared alert\r\n");
+			Send_Message(f_alert, 2, alert_id, 1);
+			DEBUG_TX("Sent cleared alert\r\n");
+			override = 0;
+			node_state = normal;
 			Enable_IRQ();
 		}
-		else if(node_state == demo)
-		{
-			if (pressed_time > T_START_PRESS)
-				screen_num = 0;
-			else
-				screen_num++;
-			if (screen_num == MAX_SCREEN)
-				screen_num = 0;
-			Set_Display(screen_num);
-			if ((screen_num == 9) | (screen_num == 16) | (screen_num == 23))
-			{
-				Delay_ms(2500);
-				screen_num++;
-				Set_Display(screen_num);
-			}
-			Enable_IRQ();    // Make sure that button is enabled before stopping
-			stop_mode = 1;
-			HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
-		}
+		Enable_IRQ();
+		Power_Down();
+		return;
+	}
+	else if(node_state == demo)
+	{
+		if ((button_press == PRESS_RIGHT_LONG) | (button_press == PRESS_LEFT_LONG))
+			screen_num = 0;
 		else
+			screen_num++;
+		if (screen_num == MAX_SCREEN)
+			screen_num = 0;
+		Set_Display(screen_num);
+		if ((screen_num == 9) | (screen_num == 16) | (screen_num == 23))
 		{
-			Enable_IRQ();    // Make sure that button is enabled before stopping
-			stop_mode = 1;
-			HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+			Delay_ms(2500);
+			screen_num++;
+			Set_Display(screen_num);
 		}
+		Enable_IRQ();    // Make sure that button is enabled before stopping
+		Power_Down();
+		return;
 	}
 	else
 	{
-		DEBUG_TX( "Other button pressed: \r\n" );
+		Enable_IRQ();    // Make sure that button is enabled before stopping
+		Power_Down();
+		return;
 	}
 }
 
 void Enable_IRQ(void)
 {
+	DEBUG_TX("Enable_IRQ\r\n");
 	// This is the recommended way of clearing IRQs
+	while (HAL_NVIC_GetPendingIRQ(EXTI15_10_IRQn))
+	{
+		__HAL_GPIO_EXTI_CLEAR_IT(EXTI15_10_IRQn);
+		HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
+	}
+	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 	while (HAL_NVIC_GetPendingIRQ(EXTI3_IRQn))
 	{
 		__HAL_GPIO_EXTI_CLEAR_IT(EXTI3_IRQn);
 		HAL_NVIC_ClearPendingIRQ(EXTI3_IRQn);
 	}
 	HAL_NVIC_EnableIRQ(EXTI3_IRQn);
+	return;
+}
+
+void Power_Down(void)
+{
+	DEBUG_TX("Powering down\r\n");
+	Delay_ms(100);
+	/*
+	__HAL_RCC_GPIOA_CLK_DISABLE();
+	__HAL_RCC_GPIOB_CLK_DISABLE();
+	__HAL_RCC_GPIOC_CLK_DISABLE();
+	__HAL_RCC_GPIOD_CLK_DISABLE();
+	__HAL_RCC_GPIOH_CLK_DISABLE();
+	*/
+	stop_mode = 1;
+	//HAL_SuspendTick();
+	HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+	DEBUG_TX("Powered down\r\n");
 }
 
 void Network_Include(void)
@@ -756,14 +947,34 @@ uint16_t Radio_Rx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_siz
 void Radio_On(void)
 {
 	DEBUG_TX("Radio_On\r\n");
+    HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_SET);
-    Delay_ms(1000);
+    HAL_UART_MspInit(&huart3);
+    Delay_ms(750);
+    HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_RESET);
 }
 
 void Radio_Off(void)
 {
+	GPIO_InitTypeDef GPIO_InitStruct;
 	DEBUG_TX("Radio_Off\r\n");
+	HAL_UART_MspDeInit(&huart3);
     HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_RESET);
+    Delay_ms(5);
+	__GPIOB_CLK_ENABLE();
+	GPIO_InitStruct.Pin = GPIO_PIN_10;
+	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+	GPIO_InitStruct.Pin = GPIO_PIN_11;
+	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+	GPIO_InitStruct.Pin = RADIO_BUSY_Pin|RADIO_CARRIER_DETECT_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+	//__GPIOB_CLK_DISABLE();
 }
 
 void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t ack)
@@ -965,6 +1176,7 @@ void Store_Config(void)
 		sprintf(debug_buff, "Override updated:%d\r\n", override);
 		DEBUG_TX(debug_buff);
 		if(override != old_override)
+		{
 			if(override)
 			{
 				Set_Display(DISPLAY_OVERRIDE);
@@ -975,6 +1187,7 @@ void Store_Config(void)
 				Set_Display(DISPLAY_NORMAL);
 				node_state = normal;
 			}
+		}
 	}
 }
 
@@ -986,7 +1199,7 @@ uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer)
 	while (1)
 	{
 		__HAL_UART_FLUSH_DRREGISTER(&huart3);
-		status = Rx_Message(Rx_Buffer, &length, 4100);
+		status = Rx_Message(Rx_Buffer, &length, 2000);
 		if (status == HAL_OK)
 		{
 			sprintf(debug_buff, "MS Rx: %02x %02x %02x %02x %02x %02x, Length: %d\r\n", Rx_Buffer[0], Rx_Buffer[1], Rx_Buffer[2], Rx_Buffer[3], Rx_Buffer[4], Rx_Buffer[5], length);
@@ -1068,14 +1281,14 @@ void RTC_TimeShow(void)
   DEBUG_TX(debug_buff);
 }
 
-uint8_t Send_Delay(void)
+void Send_Delay(void)
 {
 	/*
 	At 1 Kbps it takes 16*8 = 128 ms to send a message, but there is overhead,
-	so assume 4 messages per second = 10 in the 2 seconds available in the frame.
-	We need a number between 0 and 7 for the delay, x 250 ms.
+	so assume 4 messages per second.
+	We need a number between 0 and 3 for the delay, x 250 ms.
 	*/
-	uint32_t delay = (Cbr_Now() & 0x7) * 250;
+	uint32_t delay = (Cbr_Now() & 0x3) * 250;
 	sprintf(debug_buff,"Send_Delay: %d\r\n", (int)delay);
 	DEBUG_TX(debug_buff);
 	Delay_ms(delay);
@@ -1125,8 +1338,9 @@ void RTC_Delay(uint32_t delay)    // Delay is in seconds
 	sAlarm.Alarm = RTC_ALARM_A;
 	HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, FORMAT_BIN);
 	Enable_IRQ();    // Make sure that button is enabled before stopping
-	stop_mode = 1;
-	HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+	Radio_Off();
+	Delay_ms(10);
+	Power_Down();
 }
 
 void HMS(uint32_t e, uint8_t *h, uint8_t *m, uint8_t *s)

@@ -995,7 +995,8 @@ uint8_t ecog_discharge_capacitors(void)
   ECOG_RESET_ON;                                                                        /* Reset line low */
   ECOG_CS_ON;                                                                           /* Select device */
   ECOG_DISCHARGE_ON;                                                                    /* Discharge display */
-  timers_sdelay(150);                                                                   /* Delay 150ms */
+  //timers_sdelay(150);                                                                   /* Delay 150ms */
+  timers_sdelay(300);                                                                   /* Delay 150ms */
   ECOG_DISCHARGE_OFF;                                                                   /* Discharge off */
 }
 
