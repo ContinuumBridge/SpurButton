@@ -20,11 +20,8 @@
 #include "usart.h"
 
 #define CB_DEBUG 1
-#define T_RESET_PRESS 10
-#define T_START_PRESS 2
-#define T_REVERT_PRESS 2
 
-#define Delay_ms(ms) HAL_Delay(ms)
+ #define Delay_ms(ms) HAL_Delay(ms)
 #define Delay_us(us) DWT_Delay(us)
 
 #define COUNTOF(x)  		(sizeof(x) / sizeof((x)[0]))
