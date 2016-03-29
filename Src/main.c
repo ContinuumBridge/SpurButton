@@ -92,8 +92,9 @@
 #define  f_ack                0x08
 #define  f_beacon             0x0A
 
-#define LEFT_SIDE			  0
+#define NO_SIDE               0
 #define RIGHT_SIDE			  1
+#define LEFT_SIDE			  2
 #define PRESS_LEFT_SHORT	  0
 #define PRESS_RIGHT_SHORT     1
 #define PRESS_LEFT_LONG		  2
@@ -104,8 +105,8 @@
 #define PRESS_NONE            7
 
 //uint8_t node_id[] = {0x00, 0x00, 0x00, 0x2F};    // Battery
-uint8_t node_id[] = {0x00, 0x00, 0x00, 0x0A};  // Demo
-//uint8_t node_id[] = {0x00, 0x00, 0x00, 0x10};  // Demo A
+//uint8_t node_id[] = {0x00, 0x00, 0x00, 0x0A};  // Demo
+uint8_t node_id[] = {0x00, 0x00, 0x00, 0x10};  // Demo A
 char screens[MAX_SCREEN][REGIONS][128];
 HAL_StatusTypeDef status;
 int length;
@@ -122,12 +123,12 @@ int screen_num = 0;
 RTC_HandleTypeDef hrtc;
 uint8_t include_state = 0;
 uint8_t send_attempt = 0;
-uint8_t sleeping = 0;
 char debug_buff[64] = {0};
 uint8_t config_stored = 0;
 uint8_t override = 0;
 uint8_t stop_mode = 0;
 uint8_t current_screen = 0;
+int irq_enable_time = 0;
 
 typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
@@ -151,7 +152,6 @@ void Manage_Send(uint8_t ack);
 void Enable_IRQ(void);
 void Network_Include(void);
 void Listen_Radio(void);
-void Wakeup(void);
 void Set_Wakeup(uint8_t force_awake);
 void Build_Screen(uint8_t screen_num);
 void Store_Config(void);
@@ -221,10 +221,12 @@ int main(void)
   HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
   HAL_ADC_MspDeInit(&hadc);
-  GPIO_InitStruct.Pin = BATT_VOLTAGE_Pin|DISPLAY_TEMP_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  //GPIO_InitStruct.Pin = BATT_VOLTAGE_Pin|DISPLAY_TEMP_Pin;
+  //GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+  //GPIO_InitStruct.Pull = GPIO_NOPULL;
+  //HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  HAL_DBGMCU_DisableDBGStopMode();
 
   DEBUG_TX("Hello Computer v2\r\n");
   Load_Normal_Screens();
@@ -300,10 +302,6 @@ int main(void)
 
   while (1)
   {
-
-	  /*
-	  __HAL_UART_FLUSH_DRREGISTER(&huart3);
-	  */
 
   /* USER CODE END WHILE */
 
@@ -395,7 +393,7 @@ static void SYSCLKConfig_STOP(void)
 
 static void SystemPower_Config(void)
 {
-  GPIO_InitTypeDef GPIO_InitStructure = {0};
+  //GPIO_InitTypeDef GPIO_InitStructure = {0};
   /* Enable Ultra low power mode */
   HAL_PWREx_EnableUltraLowPower();
   /* Enable the fast wake up from Ultra low power mode */
@@ -554,7 +552,7 @@ void Build_Screen(uint8_t screen_num)
 
 uint8_t On_Button_Press(uint16_t GPIO_Pin)
 {
-	int side;
+	int side = NO_SIDE;
 	GPIO_PinState  button_state;
 	static uint32_t button_press_time[2] = {0, 0};
 	static uint8_t last_action_pressed[2] = {0, 0};
@@ -586,7 +584,7 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 		Delay_ms(100);  // Debounce
 		if (HAL_GPIO_ReadPin(GPIOA, GPIO_Pin) == GPIO_PIN_SET)
 		{
-			DEBUG_TX( "Returning from pressed\r\n" );
+			//DEBUG_TX( "Returning from pressed\r\n" );
 			return PRESS_NONE;
 		}
 		else
@@ -601,7 +599,7 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 		Delay_ms(100);  // Debounce
 		if (HAL_GPIO_ReadPin(GPIOA, GPIO_Pin) == GPIO_PIN_RESET)
 		{
-			DEBUG_TX( "Returning from released\r\n" );
+			//DEBUG_TX( "Returning from released\r\n" );
 			return PRESS_NONE;
 		}
 		else
@@ -619,7 +617,7 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 				last_action_pressed[i] = 0;
 			}
 			button_pressed = 1;
-			DEBUG_TX( "Button released: \r\n" );
+			//DEBUG_TX( "Button released: \r\n" );
 		}
 	}
 	if(button_pressed)
@@ -627,19 +625,19 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 		button_pressed = 0;
 		if (pressed_time > T_RESET_PRESS)
 		{
-			DEBUG_TX( "Reset press\r\n");
+			//DEBUG_TX( "Reset press\r\n");
 			return PRESS_RESET;
 		}
 		else if(pressed_time > T_LONG_PRESS)
 		{
 			if(side == LEFT_SIDE)
 			{
-				DEBUG_TX( "Left long press\r\n" );
+				//DEBUG_TX( "Left long press\r\n" );
 				return PRESS_LEFT_LONG;
 			}
 			else
 			{
-				DEBUG_TX( "Right long press\r\n" );
+				//DEBUG_TX( "Right long press\r\n" );
 				return PRESS_RIGHT_LONG;
 			}
 		}
@@ -647,12 +645,12 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 		{
 			if(side == LEFT_SIDE)
 			{
-				DEBUG_TX( "Left short press\r\n" );
+				//DEBUG_TX( "Left short press\r\n" );
 				return PRESS_LEFT_SHORT;
 			}
 			else
 			{
-				DEBUG_TX( "Right short press\r\n" );
+				//DEBUG_TX( "Right short press\r\n" );
 				return PRESS_RIGHT_SHORT;
 			}
 		}
@@ -667,33 +665,34 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
     /* Configures system clock after wake-up from STOP: enable HSE, PLL and select
     PLL as system clock source (HSE and PLL are disabled in STOP mode) */
+	//SYSCLKConfig_STOP();
+	//HAL_UART_MspInit(&huart1);
+	//DEBUG_TX("Button press\r\n");
+	//Delay_ms(1000);
+	//RTC_Delay(20);
+	//return;
 	if(stop_mode)
 	{
 		SYSCLKConfig_STOP();
+		HAL_UART_MspInit(&huart1);
 		//HAL_ResumeTick();
 		stop_mode = 0;
 	}
+	if((Cbr_Now() - irq_enable_time) < 2)  // An extra IRQ sometimes gets through
+		return;
 	button_press = On_Button_Press(GPIO_Pin);
 
-	if (button_press == PRESS_NONE)
+	if(button_press == PRESS_NONE)
 	{
 		Power_Down();
 		return;
 	}
-	else if (button_press == PRESS_RESET)
+	else if(button_press == PRESS_RESET)
 	{
 		DEBUG_TX("System Reset");
 		NVIC_SystemReset();
-		/*
-		Load_Normal_Screens();
-		ecog_init();
-		Set_Display(DISPLAY_INITIAL);
-		Enable_IRQ();
-		node_state = initial;
-		Power_Down();
-		*/
 	}
-	else if (node_state == initial)
+	else if(node_state == initial)
 	{
 		DEBUG_TX("node_state is initial\r\n");
 		if ((button_press == PRESS_RIGHT_LONG) | (button_press == PRESS_LEFT_LONG))
@@ -704,9 +703,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		{
 			DEBUG_TX("Starting demo mode\r\n");
 			Radio_Off();
-			Enable_IRQ();
 			Load_Demo_Screens();
 			Set_Display(0);
+			Enable_IRQ();
 			node_state = demo;
 			Power_Down();
 			return;
@@ -762,6 +761,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	}
 	else if(node_state == demo)
 	{
+		DEBUG_TX("Node state demo\r\n");
 		if ((button_press == PRESS_RIGHT_LONG) | (button_press == PRESS_LEFT_LONG))
 			screen_num = 0;
 		else
@@ -781,6 +781,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	}
 	else
 	{
+		DEBUG_TX("Undefined node state\r\n");
 		Enable_IRQ();    // Make sure that button is enabled before stopping
 		Power_Down();
 		return;
@@ -789,20 +790,23 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 void Enable_IRQ(void)
 {
+	uint32_t c = 1000;  // In case something has gone wrong
 	DEBUG_TX("Enable_IRQ\r\n");
 	// This is the recommended way of clearing IRQs
-	while (HAL_NVIC_GetPendingIRQ(EXTI15_10_IRQn))
+	while (HAL_NVIC_GetPendingIRQ(EXTI15_10_IRQn) && c--)
 	{
 		__HAL_GPIO_EXTI_CLEAR_IT(EXTI15_10_IRQn);
 		HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
 	}
 	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-	while (HAL_NVIC_GetPendingIRQ(EXTI3_IRQn))
+	c = 1000;
+	while (HAL_NVIC_GetPendingIRQ(EXTI3_IRQn) && c--)
 	{
 		__HAL_GPIO_EXTI_CLEAR_IT(EXTI3_IRQn);
 		HAL_NVIC_ClearPendingIRQ(EXTI3_IRQn);
 	}
 	HAL_NVIC_EnableIRQ(EXTI3_IRQn);
+	irq_enable_time = Cbr_Now();
 	return;
 }
 
@@ -817,6 +821,7 @@ void Power_Down(void)
 	__HAL_RCC_GPIOD_CLK_DISABLE();
 	__HAL_RCC_GPIOH_CLK_DISABLE();
 	*/
+	HAL_UART_MspDeInit(&huart1);
 	stop_mode = 1;
 	//HAL_SuspendTick();
 	HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
@@ -1018,6 +1023,7 @@ void Manage_Send(uint8_t ack)
 	else
 	{
 		DEBUG_TX("Manage_Send did not find beacon\r\n");
+		// *** Left in high power state
 		return;
 	}
 	if(ack)
@@ -1030,7 +1036,6 @@ void Manage_Send(uint8_t ack)
 				send_attempt = 0;
 				DEBUG_TX("Manage_Send ack received\r\n");
 				Set_Wakeup(0);
-				return;
 			}
 			else
 			{
@@ -1122,19 +1127,9 @@ void Set_Wakeup(uint8_t force_awake)
 			sprintf(debug_buff, "Set_Wakeup for %d\r\n", (int)wakeup);
 			DEBUG_TX(debug_buff);
 			Radio_Off();
-			sleeping = 1;
 			RTC_Delay(wakeup);
 		}
 	}
-}
-
-void Wakeup(void)
-{
-	DEBUG_TX("Woken up\r\n");
-	Enable_IRQ();  // Just in case something's gone wrong and it's disabled
-	sleeping = 0;
-	uint8_t data[] = {0x00, 0x00};
-	Send_Message(f_woken_up, 0, data, 1);
 }
 
 void Store_Config(void)
@@ -1317,6 +1312,7 @@ void RTC_Delay(uint32_t delay)    // Delay is in seconds
 	HMS(delay, &h, &m, &s);
 	HAL_RTC_GetTime(&hrtc, &rtcTime, RTC_FORMAT_BIN);
 	HAL_RTC_GetDate(&hrtc, &sdatestructureget, RTC_FORMAT_BIN);  // Needed after HAL_RTC_GetTime to prevent locking
+	strcpy(debug_buff, "                                                               ");
 	sprintf(debug_buff,"Time now: %02d:%02d:%02d\r\n",rtcTime.Hours, rtcTime.Minutes, rtcTime.Seconds);
 	DEBUG_TX(debug_buff);
     cs = (rtcTime.Seconds + s)/60; s = (rtcTime.Seconds + s)%60;
@@ -1339,7 +1335,7 @@ void RTC_Delay(uint32_t delay)    // Delay is in seconds
 	HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, FORMAT_BIN);
 	Enable_IRQ();    // Make sure that button is enabled before stopping
 	Radio_Off();
-	Delay_ms(10);
+	Delay_ms(100);
 	Power_Down();
 }
 
@@ -1352,9 +1348,17 @@ void HMS(uint32_t e, uint8_t *h, uint8_t *m, uint8_t *s)
 
 void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
 {
+	GPIO_PinState  button_state;
+	//SYSCLKConfig_STOP();
+	//HAL_UART_MspInit(&huart1);
+	//DEBUG_TX("Alarm wake ups\r\n");
+	//Delay_ms(1000);
+	//RTC_Delay(20);
+	//return;
 	if(stop_mode)
 	{
 		SYSCLKConfig_STOP();
+		HAL_UART_MspInit(&huart1);
 		stop_mode = 0;
 	}
 	DEBUG_TX("\r\nHAL_RTC_AlarmAEventCallback\r\n");
@@ -1364,16 +1368,15 @@ void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
 	}
 	else if(send_attempt == 4)
 		Manage_Send(1);
-	else if(sleeping)
-		Wakeup();
+	else
+	{
+		DEBUG_TX("Woken up\r\n");
+		Delay_ms(100);
+		Enable_IRQ();  // Just in case something's gone wrong and it's disabled
+		uint8_t data[] = {0x00, 0x00};
+		Send_Message(f_woken_up, 0, data, 1);
+	}
 }
-
-/*
-void HAL_RTCEx_WakeUpTimerEventCallback(RTC_HandleTypeDef *hrtc)
-{
-	DEBUG_TX("\r\nHAL_RTC_AlarmAEventCallback\r\n");
-}
-*/
 
 void Load_Normal_Screens(void)
 {

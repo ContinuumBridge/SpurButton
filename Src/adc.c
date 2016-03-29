@@ -111,14 +111,15 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* hadc)
   /* USER CODE BEGIN ADC1_MspDeInit 0 */
 
   /* USER CODE END ADC1_MspDeInit 0 */
-    /* Peripheral clock disable */
-    __ADC1_CLK_DISABLE();
   
     /**ADC GPIO Configuration    
     PB0     ------> ADC_IN8
     PB1     ------> ADC_IN9 
     */
     HAL_GPIO_DeInit(GPIOB, BATT_VOLTAGE_Pin|DISPLAY_TEMP_Pin);
+
+    /* Peripheral clock disable */
+     __ADC1_CLK_DISABLE();
 
   }
   /* USER CODE BEGIN ADC1_MspDeInit 1 */
