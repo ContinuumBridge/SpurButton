@@ -679,7 +679,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		stop_mode = 0;
 	}
 	if((Cbr_Now() - irq_enable_time) < 2)  // An extra IRQ sometimes gets through
+	{
+		Power_Down();
 		return;
+	}
 	button_press = On_Button_Press(GPIO_Pin);
 
 	if(button_press == PRESS_NONE)
