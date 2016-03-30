@@ -18,7 +18,6 @@ int16_t ecogx;                                                                  
 int16_t ecogy;                                                                          /* Y position */
 uint8_t ecog_display_enabled;                                                           /* Display enabled flag */
 
-
 /**********************************
  ecog_dump -   Dump screen buffer
  Author:       B.Harris
@@ -793,6 +792,7 @@ uint8_t ecog_write_screen_data(void)
   //timers_sdelay(150);  // PCX added
 //
 //
+  Enable_IRQ();
   ecog_write_inverse(1);
 //dprintf("Normal\r\n");
 

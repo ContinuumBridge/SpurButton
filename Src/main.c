@@ -107,6 +107,8 @@
 //uint8_t node_id[] = {0x00, 0x00, 0x00, 0x2F};    // Battery
 //uint8_t node_id[] = {0x00, 0x00, 0x00, 0x0A};  // Demo
 uint8_t node_id[] = {0x00, 0x00, 0x00, 0x10};  // Demo A
+
+char debug_buff[64] = {0};
 char screens[MAX_SCREEN][REGIONS][128];
 HAL_StatusTypeDef status;
 int length;
@@ -123,12 +125,11 @@ int screen_num = 0;
 RTC_HandleTypeDef hrtc;
 uint8_t include_state = 0;
 uint8_t send_attempt = 0;
-char debug_buff[64] = {0};
 uint8_t config_stored = 0;
 uint8_t override = 0;
 uint8_t stop_mode = 0;
 uint8_t current_screen = 0;
-int irq_enable_time = 0;
+int end_irq_ignore_time = 0;
 
 typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
@@ -139,11 +140,6 @@ NodeState         node_state           = initial;
 void SystemClock_Config(void);
 void Set_Display(uint8_t screen_num);
 HAL_StatusTypeDef Rx_Message(uint8_t *buffer, int *length, uint16_t timeout);
-static void RTC_TimeShow(void);
-void RTC_Delay(uint32_t delay);
-uint32_t Cbr_Now(void);
-uint32_t Cbr_Time(uint8_t h, uint8_t m, uint8_t s);
-void HMS(uint32_t e, uint8_t *h, uint8_t *m, uint8_t *s);
 void Radio_On(void);
 void Radio_Off(void);
 uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer);
@@ -665,12 +661,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
     /* Configures system clock after wake-up from STOP: enable HSE, PLL and select
     PLL as system clock source (HSE and PLL are disabled in STOP mode) */
-	//SYSCLKConfig_STOP();
-	//HAL_UART_MspInit(&huart1);
-	//DEBUG_TX("Button press\r\n");
-	//Delay_ms(1000);
-	//RTC_Delay(20);
-	//return;
+	/*
+	SYSCLKConfig_STOP();
+	HAL_UART_MspInit(&huart1);
+	DEBUG_TX("Button press\r\n");
+	Delay_ms(1000);
+	RTC_Delay(20);
+	return;
+	*/
 	if(stop_mode)
 	{
 		SYSCLKConfig_STOP();
@@ -678,7 +676,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		//HAL_ResumeTick();
 		stop_mode = 0;
 	}
-	if((Cbr_Now() - irq_enable_time) < 2)  // An extra IRQ sometimes gets through
+	if((Cbr_Now() - end_irq_ignore_time) < 3)  // An extra IRQ sometimes gets through
 		return;
 	button_press = On_Button_Press(GPIO_Pin);
 
@@ -705,7 +703,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			Radio_Off();
 			Load_Demo_Screens();
 			Set_Display(0);
-			Enable_IRQ();
 			node_state = demo;
 			Power_Down();
 			return;
@@ -719,7 +716,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		else
 			Set_Display(DISPLAY_PRESSED);
 		node_state = pressed;
-		Enable_IRQ();
 		if(button_press == PRESS_LEFT_SHORT)
 		{
 			alert_id[0] = 0x00; alert_id[1] = 0x00;
@@ -753,7 +749,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			DEBUG_TX("Sent cleared alert\r\n");
 			override = 0;
 			node_state = normal;
-			Enable_IRQ();
 		}
 		Enable_IRQ();
 		Power_Down();
@@ -775,7 +770,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			screen_num++;
 			Set_Display(screen_num);
 		}
-		Enable_IRQ();    // Make sure that button is enabled before stopping
 		Power_Down();
 		return;
 	}
@@ -786,28 +780,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		Power_Down();
 		return;
 	}
-}
-
-void Enable_IRQ(void)
-{
-	uint32_t c = 1000;  // In case something has gone wrong
-	DEBUG_TX("Enable_IRQ\r\n");
-	// This is the recommended way of clearing IRQs
-	while (HAL_NVIC_GetPendingIRQ(EXTI15_10_IRQn) && c--)
-	{
-		__HAL_GPIO_EXTI_CLEAR_IT(EXTI15_10_IRQn);
-		HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
-	}
-	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-	c = 1000;
-	while (HAL_NVIC_GetPendingIRQ(EXTI3_IRQn) && c--)
-	{
-		__HAL_GPIO_EXTI_CLEAR_IT(EXTI3_IRQn);
-		HAL_NVIC_ClearPendingIRQ(EXTI3_IRQn);
-	}
-	HAL_NVIC_EnableIRQ(EXTI3_IRQn);
-	irq_enable_time = Cbr_Now();
-	return;
 }
 
 void Power_Down(void)
@@ -888,7 +860,6 @@ void Network_Include(void)
 	include_state = 0;
 	node_state = normal;
 	Set_Display(DISPLAY_NORMAL);
-	Enable_IRQ();
 	DEBUG_TX("Sending woken_up after grant\r\n");
 	Send_Message(f_woken_up, 0, data, 1);
 }
@@ -1289,72 +1260,17 @@ void Send_Delay(void)
 	Delay_ms(delay);
 }
 
-uint32_t Cbr_Now(void)
-{
-	RTC_TimeTypeDef rtc_time;
-	HAL_RTC_GetTime(&hrtc, &rtc_time, RTC_FORMAT_BIN);
-	//sprintf(debug_buff,"Cbr_Now: %02d:%02d:%02\r\n",rtc_time.Hours, rtc_time.Minutes, rtc_time.Seconds);
-	//DEBUG_TX(debug_buff);
-	return Cbr_Time(rtc_time.Hours, rtc_time.Minutes, rtc_time.Seconds);
-}
-
-uint32_t Cbr_Time(uint8_t h, uint8_t m, uint8_t s)
-{
-	return h*3600 + m*60 +s;
-}
-
-void RTC_Delay(uint32_t delay)    // Delay is in seconds
-{
-	RTC_TimeTypeDef rtcTime;
-	RTC_DateTypeDef sdatestructureget;
-	RTC_AlarmTypeDef sAlarm;
-	uint8_t h, m, s, cs, cm;
-	HMS(delay, &h, &m, &s);
-	HAL_RTC_GetTime(&hrtc, &rtcTime, RTC_FORMAT_BIN);
-	HAL_RTC_GetDate(&hrtc, &sdatestructureget, RTC_FORMAT_BIN);  // Needed after HAL_RTC_GetTime to prevent locking
-	strcpy(debug_buff, "                                                               ");
-	sprintf(debug_buff,"Time now: %02d:%02d:%02d\r\n",rtcTime.Hours, rtcTime.Minutes, rtcTime.Seconds);
-	DEBUG_TX(debug_buff);
-    cs = (rtcTime.Seconds + s)/60; s = (rtcTime.Seconds + s)%60;
-    cm = (rtcTime.Minutes + m + cs)/60; m = (rtcTime.Minutes + m + cs)%60;
-    h = (rtcTime.Hours + h + cm)%24;
-	sprintf(debug_buff,"Alarm at: %02d:%02d:%02d\r\n",h ,m, s);
-	DEBUG_TX(debug_buff);
-
-	sAlarm.AlarmTime.Hours = h;
-	sAlarm.AlarmTime.Minutes = m;
-	sAlarm.AlarmTime.Seconds = s;
-	//sAlarm.AlarmTime.SubSeconds = ss;
-	//sAlarm.AlarmTime.SubSeconds = 0x0;
-	sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
-	sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
-	sAlarm.AlarmMask = RTC_ALARMMASK_NONE;
-	sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
-	sAlarm.AlarmDateWeekDay = 1;
-	sAlarm.Alarm = RTC_ALARM_A;
-	HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, FORMAT_BIN);
-	Enable_IRQ();    // Make sure that button is enabled before stopping
-	Radio_Off();
-	Delay_ms(100);
-	Power_Down();
-}
-
-void HMS(uint32_t e, uint8_t *h, uint8_t *m, uint8_t *s)
-{
-    *s = e%60; e /= 60;
-    *m = e%60; e /= 60;
-    *h = e%24; e /= 24;
-}
 
 void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
 {
-	GPIO_PinState  button_state;
-	//SYSCLKConfig_STOP();
-	//HAL_UART_MspInit(&huart1);
-	//DEBUG_TX("Alarm wake ups\r\n");
-	//Delay_ms(1000);
-	//RTC_Delay(20);
-	//return;
+	/*
+	SYSCLKConfig_STOP();
+	HAL_UART_MspInit(&huart1);
+	DEBUG_TX("Alarm wake ups\r\n");
+	Delay_ms(1000);
+	RTC_Delay(20);
+	return;
+	*/
 	if(stop_mode)
 	{
 		SYSCLKConfig_STOP();
@@ -1372,7 +1288,6 @@ void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
 	{
 		DEBUG_TX("Woken up\r\n");
 		Delay_ms(100);
-		Enable_IRQ();  // Just in case something's gone wrong and it's disabled
 		uint8_t data[] = {0x00, 0x00};
 		Send_Message(f_woken_up, 0, data, 1);
 	}
