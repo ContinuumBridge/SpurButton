@@ -17,7 +17,6 @@
 #include "cbutils.h"
 
 extern char debug_buff[64];
-extern int end_irq_ignore_time;
 
 /* Code */
 
@@ -191,9 +190,6 @@ void RTC_Delay(uint32_t delay)    // Delay is in seconds
 	sAlarm.AlarmDateWeekDay = 1;
 	sAlarm.Alarm = RTC_ALARM_A;
 	HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, FORMAT_BIN);
-	Radio_Off();
-	Delay_ms(100);
-	Power_Down();
 }
 
 void HMS(uint32_t e, uint8_t *h, uint8_t *m, uint8_t *s)
@@ -221,7 +217,6 @@ void Enable_IRQ(void)
 		HAL_NVIC_ClearPendingIRQ(EXTI3_IRQn);
 	}
 	HAL_NVIC_EnableIRQ(EXTI3_IRQn);
-	end_irq_ignore_time = Cbr_Now();
 	return;
 }
 

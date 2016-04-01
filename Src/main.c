@@ -127,9 +127,11 @@ uint8_t include_state = 0;
 uint8_t send_attempt = 0;
 uint8_t config_stored = 0;
 uint8_t override = 0;
-uint8_t stop_mode = 0;
 uint8_t current_screen = 0;
-int end_irq_ignore_time = 0;
+uint8_t button_irq = 0;
+uint8_t rtc_irq = 0;
+uint16_t pressed_button;
+uint8_t running = 0;
 
 typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
@@ -157,6 +159,8 @@ static void SYSCLKConfig_STOP(void);
 static void SystemPower_Config(void);
 void Send_Delay(void);
 void Power_Down(void);
+void On_RTC_IRQ(void);
+void On_Button_IRQ(uint16_t GPIO_Pin);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -217,10 +221,6 @@ int main(void)
   HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
   HAL_ADC_MspDeInit(&hadc);
-  //GPIO_InitStruct.Pin = BATT_VOLTAGE_Pin|DISPLAY_TEMP_Pin;
-  //GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-  //GPIO_InitStruct.Pull = GPIO_NOPULL;
-  //HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   HAL_DBGMCU_DisableDBGStopMode();
 
@@ -268,6 +268,7 @@ int main(void)
   RADIO_TXS("ACK", 3);
   Delay_ms(200);
 
+  /*
   Radio_On();
   RADIO_TXS("Hello World", 11);
   DEBUG_TX("Sent Hello World\r\n");
@@ -285,31 +286,49 @@ int main(void)
   }
   else
   	  DEBUG_TX("Receive problem\r\n");
-  Radio_Off();
+  */
 
-  DEBUG_TX("Going into stop mode\r\n");
-  Delay_ms(100);
-  Enable_IRQ();    // Make sure that button is enabled before stopping
-  Power_Down();
+  Radio_Off();
+  HAL_UART_MspDeInit(&huart1);
+  //HAL_SuspendTick();
+  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+
   /* USER CODE END 2 */
 
-  /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  while (1)
+  while(1)
   {
+	  /* Configures system clock after wake-up from STOP: enable HSE, PLL and select
+	  PLL as system clock source (HSE and PLL are disabled in STOP mode) */
+	  SYSCLKConfig_STOP();
+	  HAL_UART_MspInit(&huart1);
+	  DEBUG_TX("Main loop\r\n");
+	  if(button_irq)
+	  {
+		  DEBUG_TX("Button IRQ\r\n");
+		  On_Button_IRQ(pressed_button);
+	  }
+	  else if(rtc_irq)
+	  {
+		  rtc_irq = 0;
+		  DEBUG_TX("RTC IRQ\r\n");
+		  On_RTC_IRQ();
+	  }
+	  button_irq = 0;
+	  Radio_Off();
+	  Delay_ms(100);
+	  HAL_UART_MspDeInit(&huart1);
+	  //HAL_PWR_EnterSTANDBYMode();
+	  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+  }
 
   /* USER CODE END WHILE */
 
   /* USER CODE BEGIN 3 */
 
-  }
   /* USER CODE END 3 */
-
 }
-
-/** System Clock Configuration
-*/
 void SystemClock_Config(void)
 {
 
@@ -577,7 +596,7 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 	button_state = HAL_GPIO_ReadPin(GPIOA, GPIO_Pin);
 	if (button_state == GPIO_PIN_RESET)
 	{
-		Delay_ms(100);  // Debounce
+		Delay_ms(60);  // No need to debounce, but can be used to check for double-click
 		if (HAL_GPIO_ReadPin(GPIOA, GPIO_Pin) == GPIO_PIN_SET)
 		{
 			//DEBUG_TX( "Returning from pressed\r\n" );
@@ -592,7 +611,7 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 	}
 	else if (button_state == GPIO_PIN_SET)
 	{
-		Delay_ms(100);  // Debounce
+		Delay_ms(60);  // No need to debounce, but can be used to check for double-click
 		if (HAL_GPIO_ReadPin(GPIOA, GPIO_Pin) == GPIO_PIN_RESET)
 		{
 			//DEBUG_TX( "Returning from released\r\n" );
@@ -600,8 +619,8 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 		}
 		else
 		{
-			HAL_NVIC_DisableIRQ(EXTI3_IRQn);
-			HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
+			//HAL_NVIC_DisableIRQ(EXTI3_IRQn);
+			//HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
 			now = Cbr_Now();
 			if(last_action_pressed[side])
 				pressed_time = now - button_press_time[side];
@@ -656,33 +675,20 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
+	button_irq = 1;
+	pressed_button = GPIO_Pin;
+	return;
+}
+
+void On_Button_IRQ(uint16_t GPIO_Pin)
+{
 	uint8_t button_press;
 	uint8_t alert_id[] = {0x00, 0x00};
 
-    /* Configures system clock after wake-up from STOP: enable HSE, PLL and select
-    PLL as system clock source (HSE and PLL are disabled in STOP mode) */
-	/*
-	SYSCLKConfig_STOP();
-	HAL_UART_MspInit(&huart1);
-	DEBUG_TX("Button press\r\n");
-	Delay_ms(1000);
-	RTC_Delay(20);
-	return;
-	*/
-	if(stop_mode)
-	{
-		SYSCLKConfig_STOP();
-		HAL_UART_MspInit(&huart1);
-		//HAL_ResumeTick();
-		stop_mode = 0;
-	}
-	if((Cbr_Now() - end_irq_ignore_time) < 3)  // An extra IRQ sometimes gets through
-		return;
 	button_press = On_Button_Press(GPIO_Pin);
 
 	if(button_press == PRESS_NONE)
 	{
-		Power_Down();
 		return;
 	}
 	else if(button_press == PRESS_RESET)
@@ -704,7 +710,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			Load_Demo_Screens();
 			Set_Display(0);
 			node_state = demo;
-			Power_Down();
 			return;
 		}
 	}
@@ -726,7 +731,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		}
 		DEBUG_TX("Sending pressed alert\r\n");
 		Send_Message(f_alert, 2, alert_id, 1);
-		Power_Down();
 		return;
 	}
 	else if(node_state == pressed)
@@ -750,9 +754,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			override = 0;
 			node_state = normal;
 		}
-		Enable_IRQ();
-		Power_Down();
-		return;
 	}
 	else if(node_state == demo)
 	{
@@ -770,14 +771,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			screen_num++;
 			Set_Display(screen_num);
 		}
-		Power_Down();
-		return;
 	}
 	else
 	{
 		DEBUG_TX("Undefined node state\r\n");
-		Enable_IRQ();    // Make sure that button is enabled before stopping
-		Power_Down();
 		return;
 	}
 }
@@ -794,7 +791,6 @@ void Power_Down(void)
 	__HAL_RCC_GPIOH_CLK_DISABLE();
 	*/
 	HAL_UART_MspDeInit(&huart1);
-	stop_mode = 1;
 	//HAL_SuspendTick();
 	HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
 	DEBUG_TX("Powered down\r\n");
@@ -1263,21 +1259,13 @@ void Send_Delay(void)
 
 void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
 {
-	/*
-	SYSCLKConfig_STOP();
-	HAL_UART_MspInit(&huart1);
-	DEBUG_TX("Alarm wake ups\r\n");
-	Delay_ms(1000);
-	RTC_Delay(20);
+	rtc_irq = 1;
 	return;
-	*/
-	if(stop_mode)
-	{
-		SYSCLKConfig_STOP();
-		HAL_UART_MspInit(&huart1);
-		stop_mode = 0;
-	}
-	DEBUG_TX("\r\nHAL_RTC_AlarmAEventCallback\r\n");
+}
+
+void On_RTC_IRQ(void)
+{
+	DEBUG_TX("\r\RTC IRQ\r\n");
 	if(include_state != 0)
 	{
 		Network_Include();
