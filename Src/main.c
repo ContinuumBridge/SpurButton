@@ -55,7 +55,7 @@
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
 //#define CB_DEMO_0
-#define FONT_1 Verdana_Pro_SemiBold18x16
+//#define FONT_1 Verdana_Pro_SemiBold18x16
 #define FONT_2 Arial_Rounded_MT_Bold19x20
 //#define FONT_2 Arial_Narrow16x20
 #define FONT_3 Arial_Rounded_MT_Bold26x27
@@ -92,9 +92,9 @@
 #define  f_ack                0x08
 #define  f_beacon             0x0A
 
-#define NO_SIDE               0
-#define RIGHT_SIDE			  1
-#define LEFT_SIDE			  2
+#define RIGHT_SIDE			  0
+#define LEFT_SIDE			  1
+
 #define PRESS_LEFT_SHORT	  0
 #define PRESS_RIGHT_SHORT     1
 #define PRESS_LEFT_LONG		  2
@@ -104,31 +104,37 @@
 #define PRESS_RESET           6
 #define PRESS_NONE            7
 
-//uint8_t node_id[] = {0x00, 0x00, 0x00, 0x2F};    // Battery
-//uint8_t node_id[] = {0x00, 0x00, 0x00, 0x0A};  // Demo
-uint8_t node_id[] = {0x00, 0x00, 0x00, 0x10};  // Demo A
-char screens[MAX_SCREEN][REGIONS][128];
-HAL_StatusTypeDef status;
-int length;
-uint8_t Rx_Buffer[128];
-uint8_t tx_message[64];
-uint8_t tx_length;
-uint8_t bridge_address[2] = {0xFF, 0xFF};
-uint8_t node_address[2] = {0x00, 0x00};
-uint8_t beacon_address[] = {0xBB, 0xBB};
-uint8_t grant_address[] = {0xBB, 0x00};
+#define RATE_MODE			  0
 
-int radio_ready   = SET;
-int screen_num = 0;
-RTC_HandleTypeDef hrtc;
-uint8_t include_state = 0;
-uint8_t send_attempt = 0;
-char debug_buff[64] = {0};
-uint8_t config_stored = 0;
-uint8_t override = 0;
-uint8_t stop_mode = 0;
-uint8_t current_screen = 0;
-int irq_enable_time = 0;
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x2F};    // Battery
+uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x0A};  // Development
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x10};  // Brexit
+
+char 				debug_buff[64] 		= {0};
+char 				screens[MAX_SCREEN][REGIONS][128];
+HAL_StatusTypeDef 	status;
+int 				length;
+uint8_t 			Rx_Buffer[128];
+uint8_t 			tx_message[64];
+uint8_t 			tx_length;
+uint8_t 			bridge_address[2] 	= {0xFF, 0xFF};
+uint8_t 			node_address[2] 	= {0x00, 0x00};
+uint8_t 			beacon_address[] 	= {0xBB, 0xBB};
+uint8_t 			grant_address[] 	= {0xBB, 0x00};
+
+int 				radio_ready   		= SET;
+int 				screen_num 			= 0;
+RTC_HandleTypeDef 	hrtc;
+uint8_t 			include_state 		= 0;
+uint8_t 			send_attempt 		= 0;
+uint8_t 			config_stored 		= 0;
+uint8_t 			override 			= 0;
+uint8_t 			current_screen 		= 0;
+uint8_t 			button_irq 			= 0;
+uint8_t 			rtc_irq				= 0;
+uint16_t 			pressed_button;
+uint16_t 			en_long_double 		= 1;
+uint8_t 			running 			= 0;
 
 typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
@@ -137,19 +143,13 @@ NodeState         node_state           = initial;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void Set_Display(uint8_t screen_num);
+void Set_Display(uint8_t screen_num, uint8_t turn_on_radio);
 HAL_StatusTypeDef Rx_Message(uint8_t *buffer, int *length, uint16_t timeout);
-static void RTC_TimeShow(void);
-void RTC_Delay(uint32_t delay);
-uint32_t Cbr_Now(void);
-uint32_t Cbr_Time(uint8_t h, uint8_t m, uint8_t s);
-void HMS(uint32_t e, uint8_t *h, uint8_t *m, uint8_t *s);
 void Radio_On(void);
 void Radio_Off(void);
 uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer);
 void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t ack);
 void Manage_Send(uint8_t ack);
-void Enable_IRQ(void);
 void Network_Include(void);
 void Listen_Radio(void);
 void Set_Wakeup(uint8_t force_awake);
@@ -161,6 +161,8 @@ static void SYSCLKConfig_STOP(void);
 static void SystemPower_Config(void);
 void Send_Delay(void);
 void Power_Down(void);
+void On_RTC_IRQ(void);
+void On_Button_IRQ(uint16_t GPIO_Pin);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -221,17 +223,13 @@ int main(void)
   HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
   HAL_ADC_MspDeInit(&hadc);
-  //GPIO_InitStruct.Pin = BATT_VOLTAGE_Pin|DISPLAY_TEMP_Pin;
-  //GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-  //GPIO_InitStruct.Pull = GPIO_NOPULL;
-  //HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   HAL_DBGMCU_DisableDBGStopMode();
 
   DEBUG_TX("Hello Computer v2\r\n");
   Load_Normal_Screens();
   ecog_init();
-  Set_Display(DISPLAY_INITIAL);
+  Set_Display(DISPLAY_INITIAL, 0);
 
   Radio_On();
   /*
@@ -289,31 +287,48 @@ int main(void)
   }
   else
   	  DEBUG_TX("Receive problem\r\n");
-  Radio_Off();
 
-  DEBUG_TX("Going into stop mode\r\n");
-  Delay_ms(100);
-  Enable_IRQ();    // Make sure that button is enabled before stopping
-  Power_Down();
+  Radio_Off();
+  HAL_UART_MspDeInit(&huart1);
+  //HAL_SuspendTick();
+  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+
   /* USER CODE END 2 */
 
-  /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  while (1)
+  while(1)
   {
+	  /* Configures system clock after wake-up from STOP: enable HSE, PLL and select
+	  PLL as system clock source (HSE and PLL are disabled in STOP mode) */
+	  SYSCLKConfig_STOP();
+	  HAL_UART_MspInit(&huart1);
+	  DEBUG_TX("Main loop\r\n");
+	  if(button_irq)
+	  {
+		  DEBUG_TX("Button IRQ\r\n");
+		  On_Button_IRQ(pressed_button);
+	  }
+	  else if(rtc_irq)
+	  {
+		  rtc_irq = 0;
+		  DEBUG_TX("RTC IRQ\r\n");
+		  On_RTC_IRQ();
+	  }
+	  button_irq = 0;
+	  Radio_Off();
+	  Delay_ms(100);
+	  HAL_UART_MspDeInit(&huart1);
+	  //HAL_PWR_EnterSTANDBYMode();
+	  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+  }
 
   /* USER CODE END WHILE */
 
   /* USER CODE BEGIN 3 */
 
-  }
   /* USER CODE END 3 */
-
 }
-
-/** System Clock Configuration
-*/
 void SystemClock_Config(void)
 {
 
@@ -428,13 +443,13 @@ static void SystemPower_Config(void)
 }
 
 
-void Set_Display(uint8_t screen_num)
+void Set_Display(uint8_t screen_num, uint8_t turn_on_radio)
 {
 	if (ecog_write_inverse(0))
 	{
 		ecog_cls();
 		Build_Screen(screen_num);
-		ecog_update_display(1);
+		ecog_update_display(1, turn_on_radio);
 		current_screen = screen_num;
 	}
 }
@@ -444,7 +459,7 @@ void Build_Screen(uint8_t screen_num)
 	int pos = 0;
 	int len;
 	uint8_t f, x, y = 0;
-	uint8_t *font = FONT_1;
+	uint8_t *font = FONT_2;
 	uint8_t w, h = 0;
 	uint8_t region = 0;
 	uint8_t parsing = 1;
@@ -473,7 +488,7 @@ void Build_Screen(uint8_t screen_num)
 			switch(f)
 			{
 				case 1:
-					font = FONT_1; break;
+					font = FONT_2; break;
 				case 2:
 					font = FONT_2; break;
 				case 3:
@@ -552,36 +567,38 @@ void Build_Screen(uint8_t screen_num)
 
 uint8_t On_Button_Press(uint16_t GPIO_Pin)
 {
-	int side = NO_SIDE;
-	GPIO_PinState  button_state;
-	static uint32_t button_press_time[2] = {0, 0};
-	static uint8_t last_action_pressed[2] = {0, 0};
-	uint32_t pressed_time = 0;
-	uint8_t button_pressed = 0;
-	uint32_t now;
-	int i;
+	int 				side 					= LEFT_SIDE;
+	GPIO_PinState  		button_state;
+	static uint32_t		button_press_time[2] 	= {0, 0};
+	static uint8_t 		last_action_pressed[2] 	= {0, 0};
+	static uint32_t		release_time[2]			= {0, 0};
+	uint32_t 			pressed_time 			= 0;
+	uint8_t 			button_pressed 			= 0;
+	uint32_t 			now;
+	int 				i;
 
 	if (GPIO_Pin == PUSH_RIGHT_Pin)
 	{
 		side = RIGHT_SIDE;
-		sprintf(debug_buff,"Right button event: %d\r\n", (int)Cbr_Now());
-		DEBUG_TX(debug_buff);
+		//sprintf(debug_buff,"Right button event: %d\r\n", (int)Cbr_Now());
+		//DEBUG_TX(debug_buff);
 	}
 	else if (GPIO_Pin == LEFT_PUSH_Pin)
 	{
 		side = LEFT_SIDE;
-		sprintf(debug_buff,"Left button event: %d\r\n", (int)Cbr_Now());
-		DEBUG_TX(debug_buff);
+		//sprintf(debug_buff,"Left button event: %d\r\n", (int)Cbr_Now());
+		//DEBUG_TX(debug_buff);
 	}
 	else
 	{
-		DEBUG_TX("Unknown button event\r\n");
+		//DEBUG_TX("Unknown button event\r\n");
 		return PRESS_NONE;
 	}
+
 	button_state = HAL_GPIO_ReadPin(GPIOA, GPIO_Pin);
 	if (button_state == GPIO_PIN_RESET)
 	{
-		Delay_ms(100);  // Debounce
+		//Delay_ms(5);  // Debounce
 		if (HAL_GPIO_ReadPin(GPIOA, GPIO_Pin) == GPIO_PIN_SET)
 		{
 			//DEBUG_TX( "Returning from pressed\r\n" );
@@ -589,14 +606,30 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 		}
 		else
 		{
-			button_press_time[side] = Cbr_Now();
-			last_action_pressed[side] = 1;
-			return PRESS_NONE;
+			if(en_long_double)
+			{
+				now = Cbr_Now();
+				if((now - release_time[side]) < 2)
+				{
+					if(side == LEFT_SIDE)
+						return PRESS_LEFT_DOUBLE;
+					else
+						return PRESS_RIGHT_DOUBLE;
+				}
+				button_press_time[side] = now;
+				last_action_pressed[side] = 1;
+				return PRESS_NONE;
+			}
+			else if(side == LEFT_SIDE)
+				return PRESS_LEFT_SHORT;
+			else
+				return PRESS_RIGHT_SHORT;
+
 		}
 	}
-	else if (button_state == GPIO_PIN_SET)
+	else if(button_state == GPIO_PIN_SET)
 	{
-		Delay_ms(100);  // Debounce
+		//Delay_ms(20);  // Debounce
 		if (HAL_GPIO_ReadPin(GPIOA, GPIO_Pin) == GPIO_PIN_RESET)
 		{
 			//DEBUG_TX( "Returning from released\r\n" );
@@ -604,11 +637,14 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 		}
 		else
 		{
-			HAL_NVIC_DisableIRQ(EXTI3_IRQn);
-			HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
+			//HAL_NVIC_DisableIRQ(EXTI3_IRQn);
+			//HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
 			now = Cbr_Now();
+			release_time[side] = now;
 			if(last_action_pressed[side])
+			{
 				pressed_time = now - button_press_time[side];
+			}
 			else
 				pressed_time = 1;   // In case a down-press was missed. This gives most transparent result
 			for(i=0; i<2; i++)
@@ -645,12 +681,12 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 		{
 			if(side == LEFT_SIDE)
 			{
-				//DEBUG_TX( "Left short press\r\n" );
+				DEBUG_TX( "Left short press\r\n" );
 				return PRESS_LEFT_SHORT;
 			}
 			else
 			{
-				//DEBUG_TX( "Right short press\r\n" );
+				DEBUG_TX( "Right short press\r\n" );
 				return PRESS_RIGHT_SHORT;
 			}
 		}
@@ -660,39 +696,27 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
+	button_irq = 1;
+	pressed_button = GPIO_Pin;
+	return;
+}
+
+void On_Button_IRQ(uint16_t GPIO_Pin)
+{
 	uint8_t button_press;
 	uint8_t alert_id[] = {0x00, 0x00};
 
-    /* Configures system clock after wake-up from STOP: enable HSE, PLL and select
-    PLL as system clock source (HSE and PLL are disabled in STOP mode) */
-	//SYSCLKConfig_STOP();
-	//HAL_UART_MspInit(&huart1);
-	//DEBUG_TX("Button press\r\n");
-	//Delay_ms(1000);
-	//RTC_Delay(20);
-	//return;
-	if(stop_mode)
-	{
-		SYSCLKConfig_STOP();
-		HAL_UART_MspInit(&huart1);
-		//HAL_ResumeTick();
-		stop_mode = 0;
-	}
-	if((Cbr_Now() - irq_enable_time) < 2)  // An extra IRQ sometimes gets through
-	{
-		Power_Down();
-		return;
-	}
 	button_press = On_Button_Press(GPIO_Pin);
+	sprintf(debug_buff, "button_press: %d\r\n", button_press);
+	DEBUG_TX(debug_buff);
 
 	if(button_press == PRESS_NONE)
 	{
-		Power_Down();
 		return;
 	}
 	else if(button_press == PRESS_RESET)
 	{
-		DEBUG_TX("System Reset");
+		DEBUG_TX("System Reset\r\n");
 		NVIC_SystemReset();
 	}
 	else if(node_state == initial)
@@ -707,22 +731,25 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			DEBUG_TX("Starting demo mode\r\n");
 			Radio_Off();
 			Load_Demo_Screens();
-			Set_Display(0);
-			Enable_IRQ();
+			Set_Display(0, 0);
 			node_state = demo;
-			Power_Down();
 			return;
 		}
 	}
 	else if(node_state == normal)
 	{
 		DEBUG_TX("node_state normal pressed\r\n");
-		if(override)
-			Set_Display(DISPLAY_OVERRIDE);
+		if(RATE_MODE)
+			Set_Display(DISPLAY_PRESSED, 1);
 		else
-			Set_Display(DISPLAY_PRESSED);
-		node_state = pressed;
-		Enable_IRQ();
+		{
+			node_state = pressed;
+			en_long_double = 1;
+			if(override)
+				Set_Display(DISPLAY_OVERRIDE, 1);
+			else
+				Set_Display(DISPLAY_PRESSED, 1);
+		}
 		if(button_press == PRESS_LEFT_SHORT)
 		{
 			alert_id[0] = 0x00; alert_id[1] = 0x00;
@@ -733,20 +760,22 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		}
 		DEBUG_TX("Sending pressed alert\r\n");
 		Send_Message(f_alert, 2, alert_id, 1);
-		Power_Down();
+		if(RATE_MODE)
+			Set_Display(DISPLAY_NORMAL, 0);
 		return;
 	}
 	else if(node_state == pressed)
 	{
 		DEBUG_TX("node_state pressed\r\n");
-		if ((button_press == PRESS_RIGHT_LONG) | (button_press == PRESS_LEFT_LONG))
+		if((button_press == PRESS_RIGHT_LONG) || (button_press == PRESS_LEFT_LONG)
+			|| (button_press == PRESS_RIGHT_DOUBLE) || (button_press == PRESS_LEFT_DOUBLE))
 		{
-			Set_Display(DISPLAY_NORMAL);
-			if(button_press == PRESS_LEFT_LONG)
+			Set_Display(DISPLAY_NORMAL, 1);
+			if((button_press == PRESS_LEFT_LONG) || (button_press == PRESS_LEFT_DOUBLE))
 			{
 				alert_id[0] = 0x01; alert_id[1] = 0x00;
 			}
-			else if(button_press == PRESS_RIGHT_LONG)
+			else if((button_press == PRESS_RIGHT_LONG) || (button_press == PRESS_RIGHT_DOUBLE))
 			{
 				alert_id[0] = 0x01; alert_id[1] = 0x01;
 			}
@@ -755,62 +784,33 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			Send_Message(f_alert, 2, alert_id, 1);
 			DEBUG_TX("Sent cleared alert\r\n");
 			override = 0;
+			en_long_double = 0;
 			node_state = normal;
-			Enable_IRQ();
 		}
-		Enable_IRQ();
-		Power_Down();
-		return;
 	}
 	else if(node_state == demo)
 	{
 		DEBUG_TX("Node state demo\r\n");
-		if ((button_press == PRESS_RIGHT_LONG) | (button_press == PRESS_LEFT_LONG))
+		if ((button_press == PRESS_RIGHT_LONG) || (button_press == PRESS_LEFT_LONG)
+			|| (button_press == PRESS_RIGHT_DOUBLE) || (button_press == PRESS_LEFT_DOUBLE))
 			screen_num = 0;
 		else
 			screen_num++;
 		if (screen_num == MAX_SCREEN)
 			screen_num = 0;
-		Set_Display(screen_num);
-		if ((screen_num == 9) | (screen_num == 16) | (screen_num == 23))
+		Set_Display(screen_num, 0);
+		if ((screen_num == 9) || (screen_num == 16) || (screen_num == 23))
 		{
 			Delay_ms(2500);
 			screen_num++;
-			Set_Display(screen_num);
+			Set_Display(screen_num, 0);
 		}
-		Enable_IRQ();    // Make sure that button is enabled before stopping
-		Power_Down();
-		return;
 	}
 	else
 	{
 		DEBUG_TX("Undefined node state\r\n");
-		Enable_IRQ();    // Make sure that button is enabled before stopping
-		Power_Down();
 		return;
 	}
-}
-
-void Enable_IRQ(void)
-{
-	uint32_t c = 1000;  // In case something has gone wrong
-	DEBUG_TX("Enable_IRQ\r\n");
-	// This is the recommended way of clearing IRQs
-	while (HAL_NVIC_GetPendingIRQ(EXTI15_10_IRQn) && c--)
-	{
-		__HAL_GPIO_EXTI_CLEAR_IT(EXTI15_10_IRQn);
-		HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
-	}
-	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-	c = 1000;
-	while (HAL_NVIC_GetPendingIRQ(EXTI3_IRQn) && c--)
-	{
-		__HAL_GPIO_EXTI_CLEAR_IT(EXTI3_IRQn);
-		HAL_NVIC_ClearPendingIRQ(EXTI3_IRQn);
-	}
-	HAL_NVIC_EnableIRQ(EXTI3_IRQn);
-	irq_enable_time = Cbr_Now();
-	return;
 }
 
 void Power_Down(void)
@@ -825,7 +825,6 @@ void Power_Down(void)
 	__HAL_RCC_GPIOH_CLK_DISABLE();
 	*/
 	HAL_UART_MspDeInit(&huart1);
-	stop_mode = 1;
 	//HAL_SuspendTick();
 	HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
 	DEBUG_TX("Powered down\r\n");
@@ -838,12 +837,12 @@ void Network_Include(void)
 	DEBUG_TX("Network_Include\r\n");
 	if(include_state == 0)
 	{
-		Set_Display(DISPLAY_CONNECTING);
+		Set_Display(DISPLAY_CONNECTING, 1);
 		include_state = 1;
 	}
 	else if(include_state == 1)
 	{
-		Set_Display(DISPLAY_PROBLEM);
+		Set_Display(DISPLAY_PROBLEM, 1);
 		include_state = 2;
 	}
 	Radio_On();
@@ -858,7 +857,8 @@ void Network_Include(void)
 		{
 			case 1:
 				Radio_Off();
-				RTC_Delay(10*60);
+				//RTC_Delay(10*60);
+				RTC_Delay(30);
 				break;
 			case 2:
 				Radio_Off();
@@ -883,17 +883,21 @@ void Network_Include(void)
 		if(equal)
 		{
 			node_address[0] = Rx_Buffer[16]; node_address[1] = Rx_Buffer[17];
+			uint8_t data[] = {0x00, 0x00};
+			Send_Message(f_ack, 0, data, 0);
+			DEBUG_TX("Sent ack for grant\r\n");
+			include_state = 0;
+			node_state = normal;
+			Set_Display(DISPLAY_NORMAL, 1);
+			DEBUG_TX("Sending woken_up after grant\r\n");
+			Send_Message(f_woken_up, 0, data, 1);
 		}
 	}
-	uint8_t data[] = {0x00, 0x00};
-	Send_Message(f_ack, 0, data, 0);
-	DEBUG_TX("Sent ack for grant\r\n");
-	include_state = 0;
-	node_state = normal;
-	Set_Display(DISPLAY_NORMAL);
-	Enable_IRQ();
-	DEBUG_TX("Sending woken_up after grant\r\n");
-	Send_Message(f_woken_up, 0, data, 1);
+	else
+	{
+		DEBUG_TX("Network_Include. Did not receive grant\r\n");
+		RTC_Delay(30);
+	}
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
@@ -1010,7 +1014,7 @@ void Manage_Send(uint8_t ack)
 {
 	sprintf(debug_buff, "Manage_Send, send_attempt: %d                          \r\n", send_attempt);
 	DEBUG_TX(debug_buff);
-	if((send_attempt == 0) | (send_attempt == 4))
+	if(send_attempt == 4)
 		Radio_On();
 	send_attempt++;
 	while(HAL_GPIO_ReadPin(GPIOB, RADIO_BUSY_Pin == GPIO_PIN_SET))
@@ -1086,7 +1090,8 @@ void Listen_Radio(void)
 		if(Rx_Buffer[4] == f_config)
 		{
 			DEBUG_TX("Listen_Radio. Config message received\r\n");
-			Store_Config();
+			if(!RATE_MODE)
+				Store_Config();
 			Send_Message(f_ack, 0, data, 0);
 			Set_Wakeup(0);
 		}
@@ -1164,7 +1169,7 @@ void Store_Config(void)
 		if(s == current_screen)
 		{
 			DEBUG_TX("Store_Config. Current screen updated\r\n");
-			Set_Display(current_screen);
+			Set_Display(current_screen, 0);
 		}
 	}
 	else if(strncmp(Rx_Buffer+pos, "C", 1) == 0)
@@ -1177,12 +1182,12 @@ void Store_Config(void)
 		{
 			if(override)
 			{
-				Set_Display(DISPLAY_OVERRIDE);
+				Set_Display(DISPLAY_OVERRIDE, 0);
 				node_state = pressed;
 			}
 			else
 			{
-				Set_Display(DISPLAY_NORMAL);
+				Set_Display(DISPLAY_NORMAL, 0);
 				node_state = normal;
 			}
 		}
@@ -1292,79 +1297,16 @@ void Send_Delay(void)
 	Delay_ms(delay);
 }
 
-uint32_t Cbr_Now(void)
-{
-	RTC_TimeTypeDef rtc_time;
-	HAL_RTC_GetTime(&hrtc, &rtc_time, RTC_FORMAT_BIN);
-	//sprintf(debug_buff,"Cbr_Now: %02d:%02d:%02\r\n",rtc_time.Hours, rtc_time.Minutes, rtc_time.Seconds);
-	//DEBUG_TX(debug_buff);
-	return Cbr_Time(rtc_time.Hours, rtc_time.Minutes, rtc_time.Seconds);
-}
-
-uint32_t Cbr_Time(uint8_t h, uint8_t m, uint8_t s)
-{
-	return h*3600 + m*60 +s;
-}
-
-void RTC_Delay(uint32_t delay)    // Delay is in seconds
-{
-	RTC_TimeTypeDef rtcTime;
-	RTC_DateTypeDef sdatestructureget;
-	RTC_AlarmTypeDef sAlarm;
-	uint8_t h, m, s, cs, cm;
-	HMS(delay, &h, &m, &s);
-	HAL_RTC_GetTime(&hrtc, &rtcTime, RTC_FORMAT_BIN);
-	HAL_RTC_GetDate(&hrtc, &sdatestructureget, RTC_FORMAT_BIN);  // Needed after HAL_RTC_GetTime to prevent locking
-	strcpy(debug_buff, "                                                               ");
-	sprintf(debug_buff,"Time now: %02d:%02d:%02d\r\n",rtcTime.Hours, rtcTime.Minutes, rtcTime.Seconds);
-	DEBUG_TX(debug_buff);
-    cs = (rtcTime.Seconds + s)/60; s = (rtcTime.Seconds + s)%60;
-    cm = (rtcTime.Minutes + m + cs)/60; m = (rtcTime.Minutes + m + cs)%60;
-    h = (rtcTime.Hours + h + cm)%24;
-	sprintf(debug_buff,"Alarm at: %02d:%02d:%02d\r\n",h ,m, s);
-	DEBUG_TX(debug_buff);
-
-	sAlarm.AlarmTime.Hours = h;
-	sAlarm.AlarmTime.Minutes = m;
-	sAlarm.AlarmTime.Seconds = s;
-	//sAlarm.AlarmTime.SubSeconds = ss;
-	//sAlarm.AlarmTime.SubSeconds = 0x0;
-	sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
-	sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
-	sAlarm.AlarmMask = RTC_ALARMMASK_NONE;
-	sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
-	sAlarm.AlarmDateWeekDay = 1;
-	sAlarm.Alarm = RTC_ALARM_A;
-	HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, FORMAT_BIN);
-	Enable_IRQ();    // Make sure that button is enabled before stopping
-	Radio_Off();
-	Delay_ms(100);
-	Power_Down();
-}
-
-void HMS(uint32_t e, uint8_t *h, uint8_t *m, uint8_t *s)
-{
-    *s = e%60; e /= 60;
-    *m = e%60; e /= 60;
-    *h = e%24; e /= 24;
-}
 
 void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
 {
-	GPIO_PinState  button_state;
-	//SYSCLKConfig_STOP();
-	//HAL_UART_MspInit(&huart1);
-	//DEBUG_TX("Alarm wake ups\r\n");
-	//Delay_ms(1000);
-	//RTC_Delay(20);
-	//return;
-	if(stop_mode)
-	{
-		SYSCLKConfig_STOP();
-		HAL_UART_MspInit(&huart1);
-		stop_mode = 0;
-	}
-	DEBUG_TX("\r\nHAL_RTC_AlarmAEventCallback\r\n");
+	rtc_irq = 1;
+	return;
+}
+
+void On_RTC_IRQ(void)
+{
+	DEBUG_TX("\r\RTC IRQ\r\n");
 	if(include_state != 0)
 	{
 		Network_Include();
@@ -1375,7 +1317,6 @@ void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
 	{
 		DEBUG_TX("Woken up\r\n");
 		Delay_ms(100);
-		Enable_IRQ();  // Just in case something's gone wrong and it's disabled
 		uint8_t data[] = {0x00, 0x00};
 		Send_Message(f_woken_up, 0, data, 1);
 	}
@@ -1388,13 +1329,28 @@ void Load_Normal_Screens(void)
 	strcpy(screens[0][0], "F\x02" "Y\x04" "C\x0F" "Welcome to Spur\xFF" "Y\x1A" "C\x0F" "Push here for 3\xFF"
 			              "Y\x30" "C\x12" "seconds to connect\xFF" "Y\x46" "C\x0A" "to network\xFF" "ES");
 	strcpy(screens[1][0], "F\x03" "Y\x05" "C\x0A" "Connecting\xFF" "Y\x20" "C\x0A" "to network\xFF" "Y\x3D"
-			              "C\x0B" "Please wait\xFF" "ES");
+						   "C\x0B" "Please wait\xFF" "ES");
 	strcpy(screens[2][0], "F\x03" "Y\x05" "C\x0D" "Communication\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
-			              "C\x0A" "Not in use\xFF" "ES");
-	strcpy(screens[4][0], "F\x02" "Y\x05" "C\x09" "Connected\xFF" "Y\x20" "C\x0B" "Configuring\xFF" "Y\x3D"
-			              "C\x0B" "Please wait\xFF" "ES");
-	strcpy(screens[5][0], "F\x03" "Y\x05" "C\x0B" "Configuring\xFF" "Y\x20" "C\x0B" "definitions\xFF" "Y\x3D"
-			              "C\x0B" "Please wait\xFF" "ES");
+		              	  "C\x0A" "Not in use\xFF" "ES");
+	if(RATE_MODE)
+	{
+		strcpy(screens[4][0], "F\x02" "Y\2" "C\x0D" "Should the UK\xFF" "Y\x16" "C\x11" "remain in the EU?\xFF"
+	              	  	  	  "X\x08" "Y\x31" "T\x08" "Push for\xFF"
+							  "F\x02" "X\x10" "Y\x47" "T\x05" "Leave\xFF"
+	  	  	  	  	  	  	  "X\x6D" "Y\x31" "T\x08" "Push for\xFF" "X\x7E"
+                			  "F\x02" "X\x74" "Y\x47" "T\x06" "Remain\xFF"
+		 		               "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
+		 		               "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
+		strcpy(screens[5][0], "F\x03" "Y\x10" "C\x09" "Thank you\xFF" "Y\x32" "C\x0D" "for your vote\xFF" "ES");
+	}
+	else
+	{
+		strcpy(screens[4][0], "F\x02" "Y\x05" "C\x09" "Connected\xFF" "Y\x20" "C\x0B" "Configuring\xFF" "Y\x3D"
+				              	 "C\x0B" "Please wait\xFF" "ES");
+		strcpy(screens[5][0], "F\x03" "Y\x05" "C\x0B" "Configuring\xFF" "Y\x20" "C\x0B" "definitions\xFF" "Y\x3D"
+				              "C\x0B" "Please wait\xFF" "ES");
+	}
+
 	for(s=0; s<6; s++)
 		for(i=0; i<128; i++)
 			if(screens[s][0][i] == 0xFF)
