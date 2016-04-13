@@ -18,7 +18,6 @@ int16_t ecogx;                                                                  
 int16_t ecogy;                                                                          /* Y position */
 uint8_t ecog_display_enabled;                                                           /* Display enabled flag */
 
-
 /**********************************
  ecog_dump -   Dump screen buffer
  Author:       B.Harris
@@ -1008,7 +1007,7 @@ uint8_t ecog_discharge_capacitors(void)
  Exits:                  1=passed, 0=failed
  Date:                   03/11/15
  *****************************************************/
-uint8_t ecog_update_display(uint8_t powered)
+uint8_t ecog_update_display(uint8_t powered, uint8_t turn_on_radio)
 {
   uint8_t init_ok;
   if (!powered)
@@ -1029,14 +1028,29 @@ uint8_t ecog_update_display(uint8_t powered)
     //UART1_Write_Text("Writing border frame\r\n");
     ecog_write_border();                                                                /* Write border data */
     //UART1_Write_Text("Discharging capacitors\r\n");
+    if(turn_on_radio)
+    {
+    	HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_SET);
+    	HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_SET);
+    	HAL_UART_MspInit(&huart3);
+    }
     ecog_discharge_capacitors();                                                        /* Discharge capacitors and power down display */
+    if(turn_on_radio)
+    	HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_RESET);
     return(1);                                                                          /* Success */
   }
   else
   {
     UART1_Write_Text("Failed initialising COG\r\n");
     UART1_Write_Text("Discharging capacitors\r\n");
+    {
+    	HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_SET);
+    	HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_SET);
+    	HAL_UART_MspInit(&huart3);
+    }
     ecog_discharge_capacitors();                                                          /* Discharge capacitors */
+    if(turn_on_radio)
+    	HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_RESET);
     return(0);
   }
 }
@@ -1086,7 +1100,7 @@ uint8_t ecog_write_inverse(uint8_t powered)
 uint8_t ecog_init(void)
 {
   ecog_cls();                                                                           /* Clear screen */
-  return(ecog_update_display(0));                                                        /* Update display */
+  return(ecog_update_display(0, 0));                                                        /* Update display */
 }
 
 
@@ -1102,7 +1116,7 @@ uint8_t ecog_disable_display(void)
   if(ecog_display_enabled)                                                              /* Currently enabled? */
   {
     ecog_cls();                                                                         /* Clear display */
-    ecog_update_display(0);                                                              /* Update display */
+    ecog_update_display(0, 0);                                                              /* Update display */
     ecog_display_enabled=0;                                                             /* Display is disabled */
   }
 }
@@ -1120,6 +1134,6 @@ uint8_t ecog_enable_display(void)
   if(!ecog_display_enabled)                                                             /* Currently enabled? */
   {
     ecog_display_enabled=1;
-    ecog_update_display(0);                                                              /* Update display */
+    ecog_update_display(0, 0);                                                              /* Update display */
   }
 }

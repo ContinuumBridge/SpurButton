@@ -21,7 +21,7 @@
 
 #define CB_DEBUG 1
 
- #define Delay_ms(ms) HAL_Delay(ms)
+#define Delay_ms(ms) HAL_Delay(ms)
 #define Delay_us(us) DWT_Delay(us)
 
 #define COUNTOF(x)  		(sizeof(x) / sizeof((x)[0]))
@@ -60,6 +60,13 @@ void DWT_Delay(uint32_t us); // microseconds
 uint16_t SPI_Rx(SPI_HandleTypeDef *hspi, uint8_t *buffer, uint16_t buffer_size);
 uint16_t SPI_Tx(SPI_HandleTypeDef *hspi, uint8_t *buffer, uint16_t buffer_size);
 uint16_t SPI_TxRx(SPI_HandleTypeDef *hspi, uint8_t *aTxBuffer, uint8_t *aRxBuffer, uint16_t buffer_size);
+
+void RTC_TimeShow(void);
+void RTC_Delay(uint32_t delay);
+uint32_t Cbr_Now(void);
+uint32_t Cbr_Time(uint8_t h, uint8_t m, uint8_t s);
+void HMS(uint32_t e, uint8_t *h, uint8_t *m, uint8_t *s);
+void Enable_IRQ(void);
 
 #ifdef __cplusplus
 }

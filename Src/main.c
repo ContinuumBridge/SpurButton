@@ -103,12 +103,22 @@
 #define PRESS_RIGHT_DOUBLE    5
 #define PRESS_RESET           6
 #define PRESS_NONE            7
+#define PRESS_DEMO	  		  8
 
-#define RATE_MODE			  0
+#define OPERATIONAL			  0
+#define RATE				  1
+#define ROLLING_DEMO		  2
+#define ROLLING_DEMO_PIN	  100
+
+#define MODE				  OPERATIONAL
 
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x2F};    // Battery
-uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x0A};  // Development
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x0A};  // Development
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x10};  // Brexit
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x11};  // Rolling Demo
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x12};  // Smart IoT Live
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x13};  // Smart IoT 19
+uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x14};  // Smart IoT 20
 
 char 				debug_buff[64] 		= {0};
 char 				screens[MAX_SCREEN][REGIONS][128];
@@ -313,7 +323,10 @@ int main(void)
 	  {
 		  rtc_irq = 0;
 		  DEBUG_TX("RTC IRQ\r\n");
-		  On_RTC_IRQ();
+		  if(MODE == ROLLING_DEMO)
+			  On_Button_IRQ(ROLLING_DEMO_PIN);
+		  else
+			  On_RTC_IRQ();
 	  }
 	  button_irq = 0;
 	  Radio_Off();
@@ -602,6 +615,8 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 		if (HAL_GPIO_ReadPin(GPIOA, GPIO_Pin) == GPIO_PIN_SET)
 		{
 			//DEBUG_TX( "Returning from pressed\r\n" );
+			button_press_time[side] = Cbr_Now();;
+			last_action_pressed[side] = 1;
 			return PRESS_NONE;
 		}
 		else
@@ -664,30 +679,33 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 			//DEBUG_TX( "Reset press\r\n");
 			return PRESS_RESET;
 		}
-		else if(pressed_time > T_LONG_PRESS)
+		else if(en_long_double)
 		{
-			if(side == LEFT_SIDE)
+			if(pressed_time > T_LONG_PRESS)
 			{
-				//DEBUG_TX( "Left long press\r\n" );
-				return PRESS_LEFT_LONG;
+				if(side == LEFT_SIDE)
+				{
+					//DEBUG_TX( "Left long press\r\n" );
+					return PRESS_LEFT_LONG;
+				}
+				else
+				{
+					//DEBUG_TX( "Right long press\r\n" );
+					return PRESS_RIGHT_LONG;
+				}
 			}
 			else
 			{
-				//DEBUG_TX( "Right long press\r\n" );
-				return PRESS_RIGHT_LONG;
-			}
-		}
-		else
-		{
-			if(side == LEFT_SIDE)
-			{
-				DEBUG_TX( "Left short press\r\n" );
-				return PRESS_LEFT_SHORT;
-			}
-			else
-			{
-				DEBUG_TX( "Right short press\r\n" );
-				return PRESS_RIGHT_SHORT;
+				if(side == LEFT_SIDE)
+				{
+					DEBUG_TX( "Left short press\r\n" );
+					return PRESS_LEFT_SHORT;
+				}
+				else
+				{
+					DEBUG_TX( "Right short press\r\n" );
+					return PRESS_RIGHT_SHORT;
+				}
 			}
 		}
 	}
@@ -706,9 +724,14 @@ void On_Button_IRQ(uint16_t GPIO_Pin)
 	uint8_t button_press;
 	uint8_t alert_id[] = {0x00, 0x00};
 
-	button_press = On_Button_Press(GPIO_Pin);
-	sprintf(debug_buff, "button_press: %d\r\n", button_press);
-	DEBUG_TX(debug_buff);
+	if(GPIO_Pin == ROLLING_DEMO_PIN)
+		button_press = PRESS_DEMO;
+	else
+	{
+		button_press = On_Button_Press(GPIO_Pin);
+		sprintf(debug_buff, "button_press: %d\r\n", button_press);
+		DEBUG_TX(debug_buff);
+	}
 
 	if(button_press == PRESS_NONE)
 	{
@@ -739,7 +762,7 @@ void On_Button_IRQ(uint16_t GPIO_Pin)
 	else if(node_state == normal)
 	{
 		DEBUG_TX("node_state normal pressed\r\n");
-		if(RATE_MODE)
+		if(MODE == RATE)
 			Set_Display(DISPLAY_PRESSED, 1);
 		else
 		{
@@ -760,7 +783,7 @@ void On_Button_IRQ(uint16_t GPIO_Pin)
 		}
 		DEBUG_TX("Sending pressed alert\r\n");
 		Send_Message(f_alert, 2, alert_id, 1);
-		if(RATE_MODE)
+		if(MODE == RATE)
 			Set_Display(DISPLAY_NORMAL, 0);
 		return;
 	}
@@ -805,6 +828,8 @@ void On_Button_IRQ(uint16_t GPIO_Pin)
 			screen_num++;
 			Set_Display(screen_num, 0);
 		}
+		if(MODE == ROLLING_DEMO)
+			RTC_Delay(5);
 	}
 	else
 	{
@@ -1030,7 +1055,8 @@ void Manage_Send(uint8_t ack)
 	else
 	{
 		DEBUG_TX("Manage_Send did not find beacon\r\n");
-		// *** Left in high power state
+		// *** Left in high power state but changed to add RTC_Delay
+		RTC_Delay(10);
 		return;
 	}
 	if(ack)
@@ -1090,7 +1116,7 @@ void Listen_Radio(void)
 		if(Rx_Buffer[4] == f_config)
 		{
 			DEBUG_TX("Listen_Radio. Config message received\r\n");
-			if(!RATE_MODE)
+			if(!MODE == RATE)
 				Store_Config();
 			Send_Message(f_ack, 0, data, 0);
 			Set_Wakeup(0);
@@ -1332,7 +1358,7 @@ void Load_Normal_Screens(void)
 						   "C\x0B" "Please wait\xFF" "ES");
 	strcpy(screens[2][0], "F\x03" "Y\x05" "C\x0D" "Communication\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
 		              	  "C\x0A" "Not in use\xFF" "ES");
-	if(RATE_MODE)
+	if(MODE == RATE)
 	{
 		strcpy(screens[4][0], "F\x02" "Y\2" "C\x0D" "Should the UK\xFF" "Y\x16" "C\x11" "remain in the EU?\xFF"
 	              	  	  	  "X\x08" "Y\x31" "T\x08" "Push for\xFF"
