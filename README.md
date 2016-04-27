@@ -1,5 +1,42 @@
 # SpurButton
 
+## Messages
+
+All messages between nodes and bridges follow the same format consisting 10 bytes of headers and a variable length payload (some messages do not have a payload):
+
+
+## Display Screen Definitions
+
+These are sent in configuration messages. Up to 32 screens may be defined. Each screen can have up to two regions and the definition of each region is limited to 128 bytes. Each region is downloaded to the button in a separate configuration message. 
+
+Screen definitions consist of a series of key characters, each followed by one or more bytes. For example, Sx is the start of the definition for screen x, where x is a 1-byte unsigned integer. All the possible operations are dfined below, where each character and parameter is a single byte:
+
+    Sx Screen x
+    Rx Region x
+    Fx Font x
+    Xx Set X position to x
+    Yy Set Y position to y
+    Lpq Draw a line from (x, y) to (p, q)
+    Bwh Draw a box starting at (x, y), width w, height h
+    Tx String of length x follows
+    Cx Centred string of length x follows
+    ER End of region
+    ES End of screen. There is no ER before this
+
+Here is an example in C format:
+
+    "F\x03" "Y\x10" "C\x0C" "Push here to\x00" "Y\x32" "C\x0E" "report a fault\x00" "ES"
+    
+and a more complex example, which includes drawing two boxes:
+    
+    "F\x02" "X\x18" "Y\x0E" "T\x04" "Push\xFF" "X\x08" "Y\x24" "T\x08" "here for\xFF"
+    "X\x20" "Y\x3C" "T\x04" "bill\xFF" "F\x02" "X\x7D" "Y\x0E" "T\x04" "Push\xFF" "X\x6D" "Y\x24"
+    "T\x08" "here for\xFF" "X\x70" "Y\x3C" "T\x07" "service\xFF"
+    "X\x02" "Y\x02" "B\x5A\x5C" "X\x03" "Y\x03" "B\x58\x5A"
+    "X\x68" "Y\x02" "B\x5A\x5C" "X\x69" "Y\x03" "B\x58\x5A" "ES"
+    
+Note that although the length of each string is given, it is still terminated by a null character, 0x00.
+
 ## General Purpose State Machine
 
 The button function is determined by a general-purpose state machine. There is a maximum of 32 states, the last four of which are
