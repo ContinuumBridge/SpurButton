@@ -4,6 +4,40 @@
 
 All messages between nodes and bridges follow the same format consisting 10 bytes of headers and a variable length payload (some messages do not have a payload):
 
+![Message Format](https://github.com/ContinuumBridge/SpurButton/blob/master/Pictures/Message_Format.jpg)
+
+All messages are acknowledged in both directions. 
+
+No new messages between a communicating bridge and node are sent until the previous message has been acknowledged.
+
+All words are sent in big endian order (MS byte first).
+
+## Field Descriptions
+
+**Message Source and Destination Addresses**
+
+A two-byte address indicating the source and destination of a message. 
+
+Nodes get their address by being added to a network (included).
+
+Once it has an address, a node will discard any message that does not have its address (or the beacon address, see below) in the destination field. 
+
+Note that the destination field is never encrypted. The rest of the message, including the source address, will be encrypted. 
+
+**Message Function Code**
+
+All function codes defined to-date are shown in Table 1: Message Function Code Definitions at the end of this section.
+
+**Total Message Length**
+
+This unsigned integer is the total message length in bytes including all headers. The total length of any message therefore cannot exceed 256 bytes.
+
+**Message Payload**
+
+The variable length payload takes various forms depending on the source and the message function code.
+Note that all messages from a bridge to a node include a “time to next wake-up” field which is sent as the first two bytes of the payload:
+
+
 
 ## Display Screen Definitions
 
