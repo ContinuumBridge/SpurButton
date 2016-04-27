@@ -116,9 +116,9 @@
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x0A};  // Development
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x10};  // Brexit
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x11};  // Rolling Demo
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x12};  // Smart IoT Live
+uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x12};  // Smart IoT 18
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x13};  // Smart IoT 19
-uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x14};  // Smart IoT 20
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x14};  // Smart IoT 20
 
 char 				debug_buff[64] 		= {0};
 char 				screens[MAX_SCREEN][REGIONS][128];
@@ -145,6 +145,7 @@ uint8_t 			rtc_irq				= 0;
 uint16_t 			pressed_button;
 uint16_t 			en_long_double 		= 1;
 uint8_t 			running 			= 0;
+GPIO_PinState  		button_state;
 
 typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
@@ -158,8 +159,8 @@ HAL_StatusTypeDef Rx_Message(uint8_t *buffer, int *length, uint16_t timeout);
 void Radio_On(void);
 void Radio_Off(void);
 uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer);
-void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t ack);
-void Manage_Send(uint8_t ack);
+void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t ack, uint8_t beacon);
+void Manage_Send(uint8_t ack, uint8_t beacon);
 void Network_Include(void);
 void Listen_Radio(void);
 void Set_Wakeup(uint8_t force_awake);
@@ -172,7 +173,7 @@ static void SystemPower_Config(void);
 void Send_Delay(void);
 void Power_Down(void);
 void On_RTC_IRQ(void);
-void On_Button_IRQ(uint16_t GPIO_Pin);
+void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -316,21 +317,21 @@ int main(void)
 	  DEBUG_TX("Main loop\r\n");
 	  if(button_irq)
 	  {
-		  DEBUG_TX("Button IRQ\r\n");
-		  On_Button_IRQ(pressed_button);
+		  //DEBUG_TX("Button IRQ\r\n");
+		  On_Button_IRQ(pressed_button, button_state);
 	  }
 	  else if(rtc_irq)
 	  {
 		  rtc_irq = 0;
 		  DEBUG_TX("RTC IRQ\r\n");
 		  if(MODE == ROLLING_DEMO)
-			  On_Button_IRQ(ROLLING_DEMO_PIN);
+			  On_Button_IRQ(ROLLING_DEMO_PIN, button_state);
 		  else
 			  On_RTC_IRQ();
 	  }
 	  button_irq = 0;
-	  Radio_Off();
-	  Delay_ms(100);
+	  //Radio_Off();
+	  //Delay_ms(100);
 	  HAL_UART_MspDeInit(&huart1);
 	  //HAL_PWR_EnterSTANDBYMode();
 	  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
@@ -578,10 +579,9 @@ void Build_Screen(uint8_t screen_num)
 	}
 }
 
-uint8_t On_Button_Press(uint16_t GPIO_Pin)
+uint8_t On_Button_Press(uint16_t GPIO_Pin, 	GPIO_PinState button_state)
 {
 	int 				side 					= LEFT_SIDE;
-	GPIO_PinState  		button_state;
 	static uint32_t		button_press_time[2] 	= {0, 0};
 	static uint8_t 		last_action_pressed[2] 	= {0, 0};
 	static uint32_t		release_time[2]			= {0, 0};
@@ -611,65 +611,42 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin)
 	button_state = HAL_GPIO_ReadPin(GPIOA, GPIO_Pin);
 	if (button_state == GPIO_PIN_RESET)
 	{
-		//Delay_ms(5);  // Debounce
-		if (HAL_GPIO_ReadPin(GPIOA, GPIO_Pin) == GPIO_PIN_SET)
+		if(en_long_double)
 		{
-			//DEBUG_TX( "Returning from pressed\r\n" );
-			button_press_time[side] = Cbr_Now();;
+			now = Cbr_Now();
+			if((now - release_time[side]) < 2)
+			{
+				if(side == LEFT_SIDE)
+					return PRESS_LEFT_DOUBLE;
+				else
+					return PRESS_RIGHT_DOUBLE;
+			}
+			button_press_time[side] = now;
 			last_action_pressed[side] = 1;
 			return PRESS_NONE;
 		}
+		else if(side == LEFT_SIDE)
+			return PRESS_LEFT_SHORT;
 		else
-		{
-			if(en_long_double)
-			{
-				now = Cbr_Now();
-				if((now - release_time[side]) < 2)
-				{
-					if(side == LEFT_SIDE)
-						return PRESS_LEFT_DOUBLE;
-					else
-						return PRESS_RIGHT_DOUBLE;
-				}
-				button_press_time[side] = now;
-				last_action_pressed[side] = 1;
-				return PRESS_NONE;
-			}
-			else if(side == LEFT_SIDE)
-				return PRESS_LEFT_SHORT;
-			else
-				return PRESS_RIGHT_SHORT;
-
-		}
+			return PRESS_RIGHT_SHORT;
 	}
 	else if(button_state == GPIO_PIN_SET)
 	{
-		//Delay_ms(20);  // Debounce
-		if (HAL_GPIO_ReadPin(GPIOA, GPIO_Pin) == GPIO_PIN_RESET)
+		now = Cbr_Now();
+		release_time[side] = now;
+		if(last_action_pressed[side])
 		{
-			//DEBUG_TX( "Returning from released\r\n" );
-			return PRESS_NONE;
+			pressed_time = now - button_press_time[side];
 		}
 		else
+			pressed_time = 1;   // In case a down-press was missed. This gives most transparent result
+		for(i=0; i<2; i++)
 		{
-			//HAL_NVIC_DisableIRQ(EXTI3_IRQn);
-			//HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
-			now = Cbr_Now();
-			release_time[side] = now;
-			if(last_action_pressed[side])
-			{
-				pressed_time = now - button_press_time[side];
-			}
-			else
-				pressed_time = 1;   // In case a down-press was missed. This gives most transparent result
-			for(i=0; i<2; i++)
-			{
-				button_press_time[i] = now;
-				last_action_pressed[i] = 0;
-			}
-			button_pressed = 1;
-			//DEBUG_TX( "Button released: \r\n" );
+			button_press_time[i] = now;
+			last_action_pressed[i] = 0;
 		}
+		button_pressed = 1;
+		//DEBUG_TX( "Button released: \r\n" );
 	}
 	if(button_pressed)
 	{
@@ -716,10 +693,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	button_irq = 1;
 	pressed_button = GPIO_Pin;
+	button_state = __HAL_GPIO_EXTI_GET_IT(GPIO_Pin);
 	return;
 }
 
-void On_Button_IRQ(uint16_t GPIO_Pin)
+void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state)
 {
 	uint8_t button_press;
 	uint8_t alert_id[] = {0x00, 0x00};
@@ -728,9 +706,9 @@ void On_Button_IRQ(uint16_t GPIO_Pin)
 		button_press = PRESS_DEMO;
 	else
 	{
-		button_press = On_Button_Press(GPIO_Pin);
-		sprintf(debug_buff, "button_press: %d\r\n", button_press);
-		DEBUG_TX(debug_buff);
+		button_press = On_Button_Press(GPIO_Pin, button_state);
+		//sprintf(debug_buff, "button_press: %d\r\n", button_press);
+		//DEBUG_TX(debug_buff);
 	}
 
 	if(button_press == PRESS_NONE)
@@ -782,7 +760,7 @@ void On_Button_IRQ(uint16_t GPIO_Pin)
 			alert_id[0] = 0x00; alert_id[1] = 0x01;
 		}
 		DEBUG_TX("Sending pressed alert\r\n");
-		Send_Message(f_alert, 2, alert_id, 1);
+		Send_Message(f_alert, 2, alert_id, 1, 0);
 		if(MODE == RATE)
 			Set_Display(DISPLAY_NORMAL, 0);
 		return;
@@ -804,7 +782,7 @@ void On_Button_IRQ(uint16_t GPIO_Pin)
 			}
 			alert_id[0] = 0x01; alert_id[1] = 0x00;
 			DEBUG_TX("Sending cleared alert\r\n");
-			Send_Message(f_alert, 2, alert_id, 1);
+			Send_Message(f_alert, 2, alert_id, 1, 0);
 			DEBUG_TX("Sent cleared alert\r\n");
 			override = 0;
 			en_long_double = 0;
@@ -874,7 +852,7 @@ void Network_Include(void)
 	if(Message_Search(beacon_address, Rx_Buffer) == SEARCH_OK)
 	{
 		bridge_address[0] = Rx_Buffer[2]; bridge_address[1] = Rx_Buffer[3];
-		Send_Message(f_include_req, 4, node_id, 0);
+		Send_Message(f_include_req, 4, node_id, 0, 0);
 	}
 	else
 	{
@@ -909,13 +887,13 @@ void Network_Include(void)
 		{
 			node_address[0] = Rx_Buffer[16]; node_address[1] = Rx_Buffer[17];
 			uint8_t data[] = {0x00, 0x00};
-			Send_Message(f_ack, 0, data, 0);
+			Send_Message(f_ack, 0, data, 0, 0);
 			DEBUG_TX("Sent ack for grant\r\n");
 			include_state = 0;
 			node_state = normal;
 			Set_Display(DISPLAY_NORMAL, 1);
 			DEBUG_TX("Sending woken_up after grant\r\n");
-			Send_Message(f_woken_up, 0, data, 1);
+			Send_Message(f_woken_up, 0, data, 1, 0);
 		}
 	}
 	else
@@ -1014,7 +992,7 @@ void Radio_Off(void)
 	//__GPIOB_CLK_DISABLE();
 }
 
-void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t ack)
+void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t ack, uint8_t beacon)
 {
 	int i;
 	DEBUG_TX("Send_Message\r\n");
@@ -1032,10 +1010,10 @@ void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t 
 	sprintf(debug_buff, "Send_Message: %02x %02x %02x %02x %02x %02x, data length: %d\r\n", tx_message[0], tx_message[1], tx_message[2], tx_message[3], tx_message[4], tx_message[5], data_length);
 	DEBUG_TX(debug_buff);
 	send_attempt = 0;
-	Manage_Send(ack);
+	Manage_Send(ack, beacon);
 }
 
-void Manage_Send(uint8_t ack)
+void Manage_Send(uint8_t ack, uint8_t beacon)
 {
 	sprintf(debug_buff, "Manage_Send, send_attempt: %d                          \r\n", send_attempt);
 	DEBUG_TX(debug_buff);
@@ -1045,20 +1023,23 @@ void Manage_Send(uint8_t ack)
 	while(HAL_GPIO_ReadPin(GPIOB, RADIO_BUSY_Pin == GPIO_PIN_SET))
 	{
 	}
-	if(Message_Search(beacon_address, Rx_Buffer) == SEARCH_OK)
+	if(beacon)
 	{
-		DEBUG_TX("Manage_Send found beacon\r\n");
-		Send_Delay();
-		RADIO_TXS(tx_message, tx_length);
-		DEBUG_TX("Manage_Send sent message\r\n");
+		if(Message_Search(beacon_address, Rx_Buffer) == SEARCH_OK)
+		{
+			DEBUG_TX("Manage_Send found beacon\r\n");
+			Send_Delay();
+		}
+		else
+		{
+			DEBUG_TX("Manage_Send did not find beacon\r\n");
+			// *** Left in high power state but changed to add RTC_Delay
+			RTC_Delay(10);
+			return;
+		}
 	}
-	else
-	{
-		DEBUG_TX("Manage_Send did not find beacon\r\n");
-		// *** Left in high power state but changed to add RTC_Delay
-		RTC_Delay(10);
-		return;
-	}
+	RADIO_TXS(tx_message, tx_length);
+	DEBUG_TX("Manage_Send sent message\r\n");
 	if(ack)
 	{
 		DEBUG_TX("Manage_Send waiting for ack\r\n");
@@ -1075,7 +1056,7 @@ void Manage_Send(uint8_t ack)
 				// If we get a message that is not an ack when expecting an ack, clear it by sending ack back.
 				DEBUG_TX("Manage_Send another message received when expecting ack\r\n");
 				uint8_t data[] = {0x00, 0x00};
-				Send_Message(f_ack, 0, data, 0);
+				Send_Message(f_ack, 0, data, 0, 0);
 				Set_Wakeup(1);
 			}
 		}
@@ -1089,7 +1070,7 @@ void Manage_Send(uint8_t ack)
 				case 3:
 				case 5:
 				case 6:
-					Manage_Send(1);
+					Manage_Send(1, beacon);
 					break;
 				case 4:
 					Radio_Off();
@@ -1116,9 +1097,9 @@ void Listen_Radio(void)
 		if(Rx_Buffer[4] == f_config)
 		{
 			DEBUG_TX("Listen_Radio. Config message received\r\n");
-			if(!MODE == RATE)
+			if(MODE != RATE)
 				Store_Config();
-			Send_Message(f_ack, 0, data, 0);
+			Send_Message(f_ack, 0, data, 0, 0);
 			Set_Wakeup(0);
 		}
 		else if(Rx_Buffer[4] == f_ack)
@@ -1129,13 +1110,13 @@ void Listen_Radio(void)
 		else
 		{
 			DEBUG_TX("Listen_Radio. Sending ack\r\n");
-			Send_Message(f_ack, 0, data, 0);
+			Send_Message(f_ack, 0, data, 0, 0);
 			Set_Wakeup(0);
 		}
 	}
 	else
 		DEBUG_TX("Listen_Radio. Search failed\r\n");
-
+		Set_Wakeup(0);
 }
 
 void Set_Wakeup(uint8_t force_awake)
@@ -1338,13 +1319,13 @@ void On_RTC_IRQ(void)
 		Network_Include();
 	}
 	else if(send_attempt == 4)
-		Manage_Send(1);
+		Manage_Send(1, 0);
 	else
 	{
 		DEBUG_TX("Woken up\r\n");
 		Delay_ms(100);
 		uint8_t data[] = {0x00, 0x00};
-		Send_Message(f_woken_up, 0, data, 1);
+		Send_Message(f_woken_up, 0, data, 1, 0);
 	}
 }
 
