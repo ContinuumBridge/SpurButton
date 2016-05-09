@@ -37,7 +37,21 @@ This unsigned integer is the total message length in bytes including all headers
 The variable length payload takes various forms depending on the source and the message function code.
 Note that all messages from a bridge to a node include a “time to next wake-up” field which is sent as the first two bytes of the payload:
 
+**Message Function Code Definitions**
 
+|Message Function Code | Source | Name |Description |Used during |
+|----------------------|--------|------|------------|------------|
+|0x00 | Node | Button Include Req |Request from a button node to be added to a network identified in a beacon message from a bridge | Network inclusion |
+|0x01 | Node | Sensor Include Req | Request from a sensor node to be added to a network identified in a beacon message from a bridge | Network inclusion |
+|0x02 | Bridge | Include Grant | Response from the bridge to an include request from a node. This assigns a new address to the node | Network inclusion|
+|0x05 | Bridge | Configuration | Node configuration command | Normal operation |
+|0x06 | Bridge | Send Battery Status | Requests node to send battery status | Noraml operation |
+|0x07 | Node | Woken Up | Indication from a node that it has woken up and the bridge may communicate with it| Normal operation |
+|0x08 | Either | Ack | All messages are acknowledged in both directions | Always |
+|0x09 | Node | Alert | A node sends an alert to its associated bridge | Normal operatiion |
+|0x0A | Bridge | Beacon | Beacon messages are broadcast periodically by a bridge. Nodes use these messages to identify local networks. A beacon message is never encrypted | Always |
+
+All function codes are fully described in the relevant sections below. These are split into Generic, Network Inclusion (adding a node to a network) and Normal Operation.
 
 ## Display Screen Definitions
 
