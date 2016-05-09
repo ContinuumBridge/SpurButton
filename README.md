@@ -53,7 +53,11 @@ Note that all messages from a bridge to a node include a “time to next wake-up
 
 All function codes are fully described in the relevant sections below. These are split into Generic, Network Inclusion (adding a node to a network) and Normal Operation.
 
-## Display Screen Definitions
+## Button Configuration Meesages
+
+This section defines the payload of configuration messages.
+
+**Display Screen Definitions**
 
 These are sent in configuration messages. Up to 32 screens may be defined. Each screen can have up to two regions and the definition of each region is limited to 128 bytes. Each region is downloaded to the button in a separate configuration message. 
 
@@ -85,7 +89,9 @@ and a more complex example, which includes drawing two boxes:
     
 Note that although the length of each string is given, it is still terminated by a null character, 0x00.
 
-## General Purpose State Machine
+**General Purpose State Machine**
+
+As the character S is already used for a screen definition, M, as in machine, is used for state machine definitions. A 16-byte state machine definition is a aseries of fields, defined below, preceeded by the character M.
 
 The button function is determined by a general-purpose state machine. There is a maximum of 32 states, the last four of which are
 reserved for system use (28, 29, 30, 31), leaving 28 for a user program. The following values are programmed for each state (each is a single byte).
