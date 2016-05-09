@@ -112,12 +112,12 @@
 
 #define MODE				  OPERATIONAL
 
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x2F};    // Battery
+uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x2F};    // Battery
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x0A};  // Development
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x10};  // Brexit
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x11};  // Rolling Demo
-uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x12};  // Smart IoT 18
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x13};  // Smart IoT 19
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x12};  // Smart IoT Live
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x13};  // Smart IoT 19 Martin's
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x14};  // Smart IoT 20
 
 char 				debug_buff[64] 		= {0};
