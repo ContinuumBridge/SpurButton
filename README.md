@@ -50,6 +50,7 @@ Note that all messages from a bridge to a node include a “time to next wake-up
 |0x08 | Either | Ack | All messages are acknowledged in both directions | Always |
 |0x09 | Node | Alert | A node sends an alert to its associated bridge | Normal operatiion |
 |0x0A | Bridge | Beacon | Beacon messages are broadcast periodically by a bridge. Nodes use these messages to identify local networks. A beacon message is never encrypted | Always |
+|0x0B | Bridge | Start | Sent after configuration download is complete | Always |
 
 All function codes are fully described in the relevant sections below. These are split into Generic, Network Inclusion (adding a node to a network) and Normal Operation.
 
