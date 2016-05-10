@@ -4,29 +4,7 @@
   * Description        : Main program body
   ******************************************************************************
   *
-  * COPYRIGHT(c) 2016 STMicroelectronics
-  *
-  * Redistribution and use in source and binary forms, with or without modification,
-  * are permitted provided that the following conditions are met:
-  *   1. Redistributions of source code must retain the above copyright notice,
-  *      this list of conditions and the following disclaimer.
-  *   2. Redistributions in binary form must reproduce the above copyright notice,
-  *      this list of conditions and the following disclaimer in the documentation
-  *      and/or other materials provided with the distribution.
-  *   3. Neither the name of STMicroelectronics nor the names of its contributors
-  *      may be used to endorse or promote products derived from this software
-  *      without specific prior written permission.
-  *
-  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-  * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-  * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-  * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  * COPYRIGHT(c) 2016 ContinuumBridge Ltd
   *
   ******************************************************************************
   */
@@ -56,61 +34,77 @@
 /* Private variables ---------------------------------------------------------*/
 //#define CB_DEMO_0
 //#define FONT_1 Verdana_Pro_SemiBold18x16
-#define FONT_2 Arial_Rounded_MT_Bold19x20
+#define FONT_2 					Arial_Rounded_MT_Bold19x20
 //#define FONT_2 Arial_Narrow16x20
-#define FONT_3 Arial_Rounded_MT_Bold26x27
+#define FONT_3 					Arial_Rounded_MT_Bold26x27
 
-#define DISPLAY_INITIAL 0
-#define DISPLAY_CONNECTING 1
-#define DISPLAY_PROBLEM 2
-#define DISPLAY_NORMAL 4
-#define DISPLAY_PRESSED 5
-#define DISPLAY_OVERRIDE 6
+#define STATE_INITIAL 			19
+#define STATE_CONNECTING 		20
+#define STATE_CONFIG 			21
+#define STATE_PROBLEM 			23
+#define STATE_NORMAL 			1
+#define STATE_PRESSED 			2
+#define STATE_OVERRIDE 			3
 
-#define SEARCH_OK 0
-#define SEARCH_TIMEOUT 1
-#define SEARCH_ERROR 2
-#define SEND_OK 0
-#define SEND_TIMEOUT 1
-#define MAX_SEARCH_TIME 6
-#define ONE_DAY (24*60*60)
-#define T_LONG_PRESS          2
-#define T_RESET_PRESS         8
+#define SEARCH_OK 				0
+#define SEARCH_TIMEOUT 			1
+#define SEARCH_ERROR 			2
+#define SEND_OK 				0
+#define SEND_TIMEOUT 			1
+#define MAX_SEARCH_TIME 		6
+#define ONE_DAY 				(24*60*60)
+#define T_LONG_PRESS          	2
+#define T_RESET_PRESS         	8
 
 #define MAX_SCREEN 32
 #define REGIONS 2
 
 // Function codes:
-#define  f_include_req        0x00
-#define  f_s_include_req      0x01
-#define  f_include_grant      0x02
-#define  f_reinclude          0x04
-#define  f_config             0x05
-#define  f_send_battery       0x06
-#define  f_alert              0x09
-#define  f_woken_up           0x07
-#define  f_ack                0x08
-#define  f_beacon             0x0A
+#define  f_include_req        	0x00
+#define  f_s_include_req      	0x01
+#define  f_include_grant      	0x02
+#define  f_reinclude          	0x04
+#define  f_config             	0x05
+#define  f_send_battery       	0x06
+#define  f_alert              	0x09
+#define  f_woken_up           	0x07
+#define  f_ack                	0x08
+#define  f_beacon             	0x0A
+#define  f_start             	0x0B
 
-#define RIGHT_SIDE			  0
-#define LEFT_SIDE			  1
+#define RIGHT_SIDE			  	0
+#define LEFT_SIDE			  	1
 
-#define PRESS_LEFT_SHORT	  0
-#define PRESS_RIGHT_SHORT     1
-#define PRESS_LEFT_LONG		  2
-#define PRESS_RIGHT_LONG      3
-#define PRESS_LEFT_DOUBLE     4
-#define PRESS_RIGHT_DOUBLE    5
-#define PRESS_RESET           6
-#define PRESS_NONE            7
-#define PRESS_DEMO	  		  8
+#define PRESS_LEFT_SINGLE	  	0
+#define PRESS_RIGHT_SINGLE    	1
+#define PRESS_LEFT_LONG		  	2
+#define PRESS_RIGHT_LONG      	3
+#define PRESS_LEFT_DOUBLE     	4
+#define PRESS_RIGHT_DOUBLE    	5
+#define PRESS_RESET           	6
+#define PRESS_NONE            	7
+#define PRESS_DEMO	  		  	8
 
-#define OPERATIONAL			  0
-#define RATE				  1
-#define ROLLING_DEMO		  2
-#define ROLLING_DEMO_PIN	  100
+#define OPERATIONAL			  	0
+#define RATE				  	1
+#define ROLLING_DEMO		  	2
+#define ROLLING_DEMO_PIN	  	100
 
-#define MODE				  OPERATIONAL
+#define S_S						0
+#define S_D						1
+#define S_A						2
+#define S_LD					3
+#define S_LS					4
+#define S_MS					5
+#define S_MD					6
+#define S_RS					7
+#define S_RD					8
+#define S_XV					9
+#define S_XS					10
+#define S_W						11
+#define S_WS					12
+
+#define MODE				  	OPERATIONAL
 
 uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x2F};    // Battery
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x0A};  // Development
@@ -122,6 +116,8 @@ uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x2F};    // Battery
 
 char 				debug_buff[64] 		= {0};
 char 				screens[MAX_SCREEN][REGIONS][128];
+uint8_t				states[24][16]      = {0xFF};
+
 HAL_StatusTypeDef 	status;
 int 				length;
 uint8_t 			Rx_Buffer[128];
@@ -146,6 +142,7 @@ uint16_t 			pressed_button;
 uint16_t 			en_long_double 		= 1;
 uint8_t 			running 			= 0;
 GPIO_PinState  		button_state;
+uint8_t				current_state		= STATE_INITIAL;
 
 typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
@@ -174,6 +171,8 @@ void Send_Delay(void);
 void Power_Down(void);
 void On_RTC_IRQ(void);
 void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state);
+void Initialise_States(void);
+void On_NewState(void);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -237,10 +236,11 @@ int main(void)
 
   HAL_DBGMCU_DisableDBGStopMode();
 
-  DEBUG_TX("Hello Computer v2\r\n");
+  DEBUG_TX("Hello Computer\r\n");
   Load_Normal_Screens();
+  Initialise_States();
   ecog_init();
-  Set_Display(DISPLAY_INITIAL, 0);
+  Set_Display(STATE_INITIAL, 0);
 
   Radio_On();
   /*
@@ -626,9 +626,9 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin, 	GPIO_PinState button_state)
 			return PRESS_NONE;
 		}
 		else if(side == LEFT_SIDE)
-			return PRESS_LEFT_SHORT;
+			return PRESS_LEFT_SINGLE;
 		else
-			return PRESS_RIGHT_SHORT;
+			return PRESS_RIGHT_SINGLE;
 	}
 	else if(button_state == GPIO_PIN_SET)
 	{
@@ -676,12 +676,12 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin, 	GPIO_PinState button_state)
 				if(side == LEFT_SIDE)
 				{
 					DEBUG_TX( "Left short press\r\n" );
-					return PRESS_LEFT_SHORT;
+					return PRESS_LEFT_SINGLE;
 				}
 				else
 				{
 					DEBUG_TX( "Right short press\r\n" );
-					return PRESS_RIGHT_SHORT;
+					return PRESS_RIGHT_SINGLE;
 				}
 			}
 		}
@@ -700,7 +700,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state)
 {
 	uint8_t button_press;
-	uint8_t alert_id[] = {0x00, 0x00};
 
 	if(GPIO_Pin == ROLLING_DEMO_PIN)
 		button_press = PRESS_DEMO;
@@ -720,7 +719,7 @@ void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state)
 		DEBUG_TX("System Reset\r\n");
 		NVIC_SystemReset();
 	}
-	else if(node_state == initial)
+	else if(current_state == STATE_INITIAL)
 	{
 		DEBUG_TX("node_state is initial\r\n");
 		if ((button_press == PRESS_RIGHT_LONG) | (button_press == PRESS_LEFT_LONG))
@@ -737,82 +736,44 @@ void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state)
 			return;
 		}
 	}
-	else if(node_state == normal)
-	{
-		DEBUG_TX("node_state normal pressed\r\n");
-		if(MODE == RATE)
-			Set_Display(DISPLAY_PRESSED, 1);
-		else
-		{
-			node_state = pressed;
-			en_long_double = 1;
-			if(override)
-				Set_Display(DISPLAY_OVERRIDE, 1);
-			else
-				Set_Display(DISPLAY_PRESSED, 1);
-		}
-		if(button_press == PRESS_LEFT_SHORT)
-		{
-			alert_id[0] = 0x00; alert_id[1] = 0x00;
-		}
-		else if(button_press == PRESS_RIGHT_SHORT)
-		{
-			alert_id[0] = 0x00; alert_id[1] = 0x01;
-		}
-		DEBUG_TX("Sending pressed alert\r\n");
-		Send_Message(f_alert, 2, alert_id, 1, 0);
-		if(MODE == RATE)
-			Set_Display(DISPLAY_NORMAL, 0);
-		return;
-	}
-	else if(node_state == pressed)
-	{
-		DEBUG_TX("node_state pressed\r\n");
-		if((button_press == PRESS_RIGHT_LONG) || (button_press == PRESS_LEFT_LONG)
-			|| (button_press == PRESS_RIGHT_DOUBLE) || (button_press == PRESS_LEFT_DOUBLE))
-		{
-			Set_Display(DISPLAY_NORMAL, 1);
-			if((button_press == PRESS_LEFT_LONG) || (button_press == PRESS_LEFT_DOUBLE))
-			{
-				alert_id[0] = 0x01; alert_id[1] = 0x00;
-			}
-			else if((button_press == PRESS_RIGHT_LONG) || (button_press == PRESS_RIGHT_DOUBLE))
-			{
-				alert_id[0] = 0x01; alert_id[1] = 0x01;
-			}
-			alert_id[0] = 0x01; alert_id[1] = 0x00;
-			DEBUG_TX("Sending cleared alert\r\n");
-			Send_Message(f_alert, 2, alert_id, 1, 0);
-			DEBUG_TX("Sent cleared alert\r\n");
-			override = 0;
-			en_long_double = 0;
-			node_state = normal;
-		}
-	}
-	else if(node_state == demo)
-	{
-		DEBUG_TX("Node state demo\r\n");
-		if ((button_press == PRESS_RIGHT_LONG) || (button_press == PRESS_LEFT_LONG)
-			|| (button_press == PRESS_RIGHT_DOUBLE) || (button_press == PRESS_LEFT_DOUBLE))
-			screen_num = 0;
-		else
-			screen_num++;
-		if (screen_num == MAX_SCREEN)
-			screen_num = 0;
-		Set_Display(screen_num, 0);
-		if ((screen_num == 9) || (screen_num == 16) || (screen_num == 23))
-		{
-			Delay_ms(2500);
-			screen_num++;
-			Set_Display(screen_num, 0);
-		}
-		if(MODE == ROLLING_DEMO)
-			RTC_Delay(5);
-	}
 	else
 	{
-		DEBUG_TX("Undefined node state\r\n");
-		return;
+		switch(button_press)
+		{
+			case PRESS_LEFT_SINGLE:
+				if(states[current_state][S_LS] != 0xFF)
+					current_state = states[current_state][S_LS];
+				break;
+			case PRESS_LEFT_DOUBLE:
+				if(states[current_state][S_LD] != 0xFF)
+					current_state = states[current_state][S_LD];
+				break;
+			case PRESS_RIGHT_SINGLE:
+				if(states[current_state][S_RS] != 0xFF)
+					current_state = states[current_state][S_RS];
+				break;
+			case PRESS_RIGHT_DOUBLE:
+				if(states[current_state][S_RD] != 0xFF)
+					current_state = states[current_state][S_RD];
+				break;
+			default:
+				DEBUG_TX("Warning. Undefined button_press\r\n");
+				current_state = states[current_state][0];
+		}
+		On_NewState();
+	}
+}
+
+void On_NewState(void)
+{
+	uint8_t alert_id[] = {0x00, 0x00};
+	if(states[current_state][S_D] != 0xFF)
+		Set_Display(states[current_state][S_D], 1);
+	if(states[current_state][S_A] != 0xFF)
+	{
+		DEBUG_TX("Sending alert\r\n");
+		alert_id[0] = states[current_state][S_A]; alert_id[1] = 0x00;
+		Send_Message(f_alert, 2, alert_id, 1, 0);
 	}
 }
 
@@ -840,12 +801,12 @@ void Network_Include(void)
 	DEBUG_TX("Network_Include\r\n");
 	if(include_state == 0)
 	{
-		Set_Display(DISPLAY_CONNECTING, 1);
+		Set_Display(STATE_CONNECTING, 1);
 		include_state = 1;
 	}
 	else if(include_state == 1)
 	{
-		Set_Display(DISPLAY_PROBLEM, 1);
+		Set_Display(STATE_PROBLEM, 1);
 		include_state = 2;
 	}
 	Radio_On();
@@ -890,8 +851,8 @@ void Network_Include(void)
 			Send_Message(f_ack, 0, data, 0, 0);
 			DEBUG_TX("Sent ack for grant\r\n");
 			include_state = 0;
-			node_state = normal;
-			Set_Display(DISPLAY_NORMAL, 1);
+			current_state = STATE_CONFIG;
+			On_NewState();
 			DEBUG_TX("Sending woken_up after grant\r\n");
 			Send_Message(f_woken_up, 0, data, 1, 0);
 		}
@@ -1102,6 +1063,14 @@ void Listen_Radio(void)
 			Send_Message(f_ack, 0, data, 0, 0);
 			Set_Wakeup(0);
 		}
+		else if(Rx_Buffer[4] == f_start)
+		{
+			DEBUG_TX("Listen_Radio. Start received\r\n");
+			Send_Message(f_ack, 0, data, 0, 0);
+			current_state = 0;
+			On_NewState();
+			Set_Wakeup(0);
+		}
 		else if(Rx_Buffer[4] == f_ack)
 		{
 			DEBUG_TX("Listen_Radio. Ack received\r\n");
@@ -1152,6 +1121,7 @@ void Store_Config(void)
 	uint8_t s, r, i = 0;
 	uint8_t pos = 12;
 	uint8_t old_override = 0;
+	DEBUG_TX("Store_Config\r\n");
 	if(strncmp(Rx_Buffer+pos, "S", 1) == 0)
 	{
 		s = Rx_Buffer[pos+1];
@@ -1189,14 +1159,31 @@ void Store_Config(void)
 		{
 			if(override)
 			{
-				Set_Display(DISPLAY_OVERRIDE, 0);
+				Set_Display(STATE_OVERRIDE, 0);
 				node_state = pressed;
 			}
 			else
 			{
-				Set_Display(DISPLAY_NORMAL, 0);
+				Set_Display(STATE_NORMAL, 0);
 				node_state = normal;
 			}
+		}
+	}
+	else if(strncmp(Rx_Buffer+pos, "M", 1) == 0)
+	{
+		DEBUG_TX("State config\r\n");
+		for(i=0; i<64; i++)
+			debug_buff[i] = 0x32;
+		s = Rx_Buffer[pos+1];
+		for(i=0; i<16; i++)
+		{
+			states[s][i] = Rx_Buffer[i+pos+1];
+		}
+		for(i=0; i<16; i++)
+		{
+			sprintf(debug_buff, "%x ", states[s][i]);
+		 	DEBUG_TX(debug_buff);
+		 	DEBUG_TX("\r\n");
 		}
 	}
 }
@@ -1313,7 +1300,7 @@ void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
 
 void On_RTC_IRQ(void)
 {
-	DEBUG_TX("\r\RTC IRQ\r\n");
+	DEBUG_TX("\rRTC IRQ\r\n");
 	if(include_state != 0)
 	{
 		Network_Include();
@@ -1333,32 +1320,15 @@ void Load_Normal_Screens(void)
 {
 	// Not very elegant, but it does the job and it shouldn't need to change:
 	int i, s;
-	strcpy(screens[0][0], "F\x02" "Y\x04" "C\x0F" "Welcome to Spur\xFF" "Y\x1A" "C\x0F" "Push here for 3\xFF"
+	strcpy(screens[12][0], "F\x02" "Y\x04" "C\x0F" "Welcome to Spur\xFF" "Y\x1A" "C\x0F" "Push here for 3\xFF"
 			              "Y\x30" "C\x12" "seconds to connect\xFF" "Y\x46" "C\x0A" "to network\xFF" "ES");
-	strcpy(screens[1][0], "F\x03" "Y\x05" "C\x0A" "Connecting\xFF" "Y\x20" "C\x0A" "to network\xFF" "Y\x3D"
+	strcpy(screens[13][0], "F\x03" "Y\x05" "C\x0A" "Connecting\xFF" "Y\x20" "C\x0A" "to network\xFF" "Y\x3D"
 						   "C\x0B" "Please wait\xFF" "ES");
-	strcpy(screens[2][0], "F\x03" "Y\x05" "C\x0D" "Communication\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
+	strcpy(screens[14][0], "F\x02" "Y\x05" "C\x09" "Connected\xFF" "Y\x20" "C\x0B" "Configuring\xFF" "Y\x3D"
+			              	 "C\x0B" "Please wait\xFF" "ES");
+	strcpy(screens[15][0], "F\x03" "Y\x05" "C\x0D" "Communication\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
 		              	  "C\x0A" "Not in use\xFF" "ES");
-	if(MODE == RATE)
-	{
-		strcpy(screens[4][0], "F\x02" "Y\2" "C\x0D" "Should the UK\xFF" "Y\x16" "C\x11" "remain in the EU?\xFF"
-	              	  	  	  "X\x08" "Y\x31" "T\x08" "Push for\xFF"
-							  "F\x02" "X\x10" "Y\x47" "T\x05" "Leave\xFF"
-	  	  	  	  	  	  	  "X\x6D" "Y\x31" "T\x08" "Push for\xFF" "X\x7E"
-                			  "F\x02" "X\x74" "Y\x47" "T\x06" "Remain\xFF"
-		 		               "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
-		 		               "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
-		strcpy(screens[5][0], "F\x03" "Y\x10" "C\x09" "Thank you\xFF" "Y\x32" "C\x0D" "for your vote\xFF" "ES");
-	}
-	else
-	{
-		strcpy(screens[4][0], "F\x02" "Y\x05" "C\x09" "Connected\xFF" "Y\x20" "C\x0B" "Configuring\xFF" "Y\x3D"
-				              	 "C\x0B" "Please wait\xFF" "ES");
-		strcpy(screens[5][0], "F\x03" "Y\x05" "C\x0B" "Configuring\xFF" "Y\x20" "C\x0B" "definitions\xFF" "Y\x3D"
-				              "C\x0B" "Please wait\xFF" "ES");
-	}
-
-	for(s=0; s<6; s++)
+	for(s=12; s<16; s++)
 		for(i=0; i<128; i++)
 			if(screens[s][0][i] == 0xFF)
 				screens[s][0][i] = 0x00;
@@ -1455,6 +1425,19 @@ void Load_Demo_Screens(void)
 				screens[s][0][i] = 0x00;
 }
 
+void Initialise_States(void)
+{
+    //                               S   D    A   LD    LS   MS  MD   RS   RD   XV   XS    W   WS
+	static const uint8_t init[16] = {12, 12, 255,  13, 255, 255,  13, 255,  13, 255, 255, 255, 255}; // Push to Connect
+	static const uint8_t conn[16] = {13, 13, 255, 255, 255, 255, 255, 255, 255,   2,  14, 255, 255}; // Connecting
+	static const uint8_t conf[16] = {14, 14, 255, 255, 255, 255, 255, 255, 255,  13,   0, 255, 255}; // Configuring
+	static const uint8_t prob[16] = {15, 15, 255,  12, 255, 255,  12, 255,  12,  13,   0, 255, 255}; // Comms Problem
+	memcpy(states[STATE_INITIAL], init, sizeof(init));
+	memcpy(states[STATE_CONNECTING], conn, sizeof(conn));
+	memcpy(states[STATE_CONFIG], conf, sizeof(conf));
+	memcpy(states[STATE_PROBLEM], prob, sizeof(prob));
+}
+
 #ifdef USE_FULL_ASSERT
 
 /**
@@ -1483,4 +1466,4 @@ void assert_failed(uint8_t* file, uint32_t line)
   * @}
 */ 
 
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
+/************************ (C) COPYRIGHT ContinuumBridge Ltd *****END OF FILE****/
