@@ -42,6 +42,7 @@
 #define STATE_CONNECTING 		20
 #define STATE_CONFIG 			21
 #define STATE_PROBLEM 			23
+#define STATE_DEMO				25
 #define STATE_NORMAL 			1
 #define STATE_PRESSED 			2
 #define STATE_OVERRIDE 			3
@@ -123,26 +124,27 @@ int 				length;
 uint8_t 			Rx_Buffer[128];
 uint8_t 			tx_message[64];
 uint8_t 			tx_length;
-uint8_t 			bridge_address[2] 	= {0xFF, 0xFF};
-uint8_t 			node_address[2] 	= {0x00, 0x00};
-uint8_t 			beacon_address[] 	= {0xBB, 0xBB};
-uint8_t 			grant_address[] 	= {0xBB, 0x00};
+uint8_t 			bridge_address[2] 		= {0xFF, 0xFF};
+uint8_t 			node_address[2] 		= {0x00, 0x00};
+uint8_t 			beacon_address[] 		= {0xBB, 0xBB};
+uint8_t 			grant_address[] 		= {0xBB, 0x00};
 
-int 				radio_ready   		= SET;
-int 				screen_num 			= 0;
+int 				radio_ready   			= SET;
+int 				screen_num 				= 0;
 RTC_HandleTypeDef 	hrtc;
-uint8_t 			include_state 		= 0;
-uint8_t 			send_attempt 		= 0;
-uint8_t 			config_stored 		= 0;
-uint8_t 			override 			= 0;
-uint8_t 			current_screen 		= 0;
-uint8_t 			button_irq 			= 0;
-uint8_t 			rtc_irq				= 0;
+uint8_t 			include_state 			= 0;
+uint8_t 			send_attempt 			= 0;
+uint8_t 			config_stored 			= 0;
+uint8_t 			app_value 				= 0;
+uint8_t 			current_screen 			= 0;
+uint8_t 			button_irq 				= 0;
+uint8_t 			rtc_irq					= 0;
 uint16_t 			pressed_button;
-uint16_t 			en_long_double 		= 1;
-uint8_t 			running 			= 0;
+uint8_t 			running 				= 0;
 GPIO_PinState  		button_state;
-uint8_t				current_state		= STATE_INITIAL;
+uint8_t				current_state			= STATE_INITIAL;
+uint32_t			button_press_time[2] 	= {0, 0};
+uint8_t 			last_action_pressed[2] 	= {0, 0};
 
 typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
@@ -187,7 +189,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  int  i, s;
+  int  i;
   /* USER CODE END 1 */
 
   /* MCU Configuration----------------------------------------------------------*/
@@ -240,7 +242,6 @@ int main(void)
   Load_Normal_Screens();
   Initialise_States();
   ecog_init();
-  Set_Display(STATE_INITIAL, 0);
 
   Radio_On();
   /*
@@ -300,6 +301,7 @@ int main(void)
   	  DEBUG_TX("Receive problem\r\n");
 
   Radio_Off();
+  Set_Display(STATE_INITIAL, 0);
   HAL_UART_MspDeInit(&huart1);
   //HAL_SuspendTick();
   HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
@@ -541,6 +543,30 @@ void Build_Screen(uint8_t screen_num)
 			//sprintf(debug_buff,"Build_Screen, pos: %d, next 3 chars: %3s\r\n", pos, screens[screen_num][region] + pos);
 			//DEBUG_TX(debug_buff);
 		}
+		else if(strncmp(screens[screen_num][region]+pos, "l", 1) == 0)
+		{
+			pos++; len = screens[screen_num][region][pos]; pos++;
+			//sprintf(debug_buff,"Build_Screen, centred left text, pos: %d, len: %d   \r\n", pos, len);
+			//DEBUG_TX(debug_buff);
+			ecog_printfl(font, y, screens[screen_num][region] + pos);
+			//sprintf(debug_buff,"Build_Screen, text left: %20s\r\n", screens[screen_num][region] + pos);
+			//DEBUG_TX(debug_buff);
+			pos += len + 1;
+			//sprintf(debug_buff,"Build_Screen, pos: %d, next 3 chars: %3s\r\n", pos, screens[screen_num][region] + pos);
+			//DEBUG_TX(debug_buff);
+		}
+		else if(strncmp(screens[screen_num][region]+pos, "r", 1) == 0)
+		{
+			pos++; len = screens[screen_num][region][pos]; pos++;
+			//sprintf(debug_buff,"Build_Screen, centred right text, pos: %d, len: %d   \r\n", pos, len);
+			//DEBUG_TX(debug_buff);
+			ecog_printfr(font, y, screens[screen_num][region] + pos);
+			//sprintf(debug_buff,"Build_Screen, right text: %20s\r\n", screens[screen_num][region] + pos);
+			//DEBUG_TX(debug_buff);
+			pos += len + 1;
+			//sprintf(debug_buff,"Build_Screen, pos: %d, next 3 chars: %3s\r\n", pos, screens[screen_num][region] + pos);
+			//DEBUG_TX(debug_buff);
+		}
 		else if(strncmp(screens[screen_num][region]+pos, "T", 1) == 0)
 		{
 			ecog_position(x, y);
@@ -582,14 +608,17 @@ void Build_Screen(uint8_t screen_num)
 uint8_t On_Button_Press(uint16_t GPIO_Pin, 	GPIO_PinState button_state)
 {
 	int 				side 					= LEFT_SIDE;
-	static uint32_t		button_press_time[2] 	= {0, 0};
-	static uint8_t 		last_action_pressed[2] 	= {0, 0};
-	static uint32_t		release_time[2]			= {0, 0};
 	uint32_t 			pressed_time 			= 0;
-	uint8_t 			button_pressed 			= 0;
 	uint32_t 			now;
 	int 				i;
+	int					en_double				= 0;
 
+	if(current_state != STATE_DEMO)
+		if((states[current_state][S_LD] != 0xFF) | (states[current_state][S_RD] != 0xFF) | (states[current_state][S_MD] != 0xFF))
+		{
+			en_double = 1;
+			DEBUG_TX("Double enabled\r\n");
+		}
 	if (GPIO_Pin == PUSH_RIGHT_Pin)
 	{
 		side = RIGHT_SIDE;
@@ -608,13 +637,14 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin, 	GPIO_PinState button_state)
 		return PRESS_NONE;
 	}
 
+	now = Cbr_Now();
 	button_state = HAL_GPIO_ReadPin(GPIOA, GPIO_Pin);
 	if (button_state == GPIO_PIN_RESET)
 	{
-		if(en_long_double)
+		last_action_pressed[side] = 1;
+		if(en_double)
 		{
-			now = Cbr_Now();
-			if((now - release_time[side]) < 2)
+			if((now - button_press_time[side]) < 2)
 			{
 				if(side == LEFT_SIDE)
 					return PRESS_LEFT_DOUBLE;
@@ -622,18 +652,20 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin, 	GPIO_PinState button_state)
 					return PRESS_RIGHT_DOUBLE;
 			}
 			button_press_time[side] = now;
-			last_action_pressed[side] = 1;
 			return PRESS_NONE;
 		}
-		else if(side == LEFT_SIDE)
-			return PRESS_LEFT_SINGLE;
 		else
-			return PRESS_RIGHT_SINGLE;
+		{
+			button_press_time[side] = now;
+			if(side == LEFT_SIDE)
+				return PRESS_LEFT_SINGLE;
+			else
+				return PRESS_RIGHT_SINGLE;
+		}
 	}
 	else if(button_state == GPIO_PIN_SET)
 	{
 		now = Cbr_Now();
-		release_time[side] = now;
 		if(last_action_pressed[side])
 		{
 			pressed_time = now - button_press_time[side];
@@ -642,48 +674,19 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin, 	GPIO_PinState button_state)
 			pressed_time = 1;   // In case a down-press was missed. This gives most transparent result
 		for(i=0; i<2; i++)
 		{
-			button_press_time[i] = now;
 			last_action_pressed[i] = 0;
 		}
-		button_pressed = 1;
-		//DEBUG_TX( "Button released: \r\n" );
-	}
-	if(button_pressed)
-	{
-		button_pressed = 0;
-		if (pressed_time > T_RESET_PRESS)
+		if(pressed_time > T_RESET_PRESS)
 		{
-			//DEBUG_TX( "Reset press\r\n");
-			return PRESS_RESET;
+			DEBUG_TX("System reset\r\n");
+			NVIC_SystemReset();
 		}
-		else if(en_long_double)
+		else if(pressed_time > T_LONG_PRESS)
 		{
-			if(pressed_time > T_LONG_PRESS)
-			{
-				if(side == LEFT_SIDE)
-				{
-					//DEBUG_TX( "Left long press\r\n" );
-					return PRESS_LEFT_LONG;
-				}
-				else
-				{
-					//DEBUG_TX( "Right long press\r\n" );
-					return PRESS_RIGHT_LONG;
-				}
-			}
+			if(side == LEFT_SIDE)
+				return PRESS_LEFT_LONG;
 			else
-			{
-				if(side == LEFT_SIDE)
-				{
-					DEBUG_TX( "Left short press\r\n" );
-					return PRESS_LEFT_SINGLE;
-				}
-				else
-				{
-					DEBUG_TX( "Right short press\r\n" );
-					return PRESS_RIGHT_SINGLE;
-				}
-			}
+				return PRESS_RIGHT_LONG;
 		}
 	}
 	return PRESS_NONE; // Should not ever get here, but just in case
@@ -691,9 +694,9 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin, 	GPIO_PinState button_state)
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-	button_irq = 1;
 	pressed_button = GPIO_Pin;
 	button_state = __HAL_GPIO_EXTI_GET_IT(GPIO_Pin);
+	button_irq = 1;
 	return;
 }
 
@@ -714,11 +717,6 @@ void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state)
 	{
 		return;
 	}
-	else if(button_press == PRESS_RESET)
-	{
-		DEBUG_TX("System Reset\r\n");
-		NVIC_SystemReset();
-	}
 	else if(current_state == STATE_INITIAL)
 	{
 		DEBUG_TX("node_state is initial\r\n");
@@ -731,10 +729,31 @@ void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state)
 			DEBUG_TX("Starting demo mode\r\n");
 			Radio_Off();
 			Load_Demo_Screens();
+			screen_num = 0;
 			Set_Display(0, 0);
-			node_state = demo;
+			current_state = STATE_DEMO;
 			return;
 		}
+	}
+	else if(current_state == STATE_DEMO)
+	{
+		DEBUG_TX("Node state demo\r\n");
+		if ((button_press == PRESS_RIGHT_LONG) || (button_press == PRESS_LEFT_LONG)
+			|| (button_press == PRESS_RIGHT_DOUBLE) || (button_press == PRESS_LEFT_DOUBLE))
+			screen_num = 0;
+		else
+			screen_num++;
+		if (screen_num == MAX_SCREEN)
+			screen_num = 0;
+		Set_Display(screen_num, 0);
+		if ((screen_num == 9) || (screen_num == 16) || (screen_num == 23))
+		{
+			Delay_ms(2500);
+			screen_num++;
+			Set_Display(screen_num, 0);
+		}
+		if(MODE == ROLLING_DEMO)
+			RTC_Delay(5);
 	}
 	else
 	{
@@ -767,12 +786,15 @@ void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state)
 void On_NewState(void)
 {
 	uint8_t alert_id[] = {0x00, 0x00};
+	sprintf(debug_buff, "On_NewState, state: %d       \r\n", current_state);
+	DEBUG_TX(debug_buff);
 	if(states[current_state][S_D] != 0xFF)
 		Set_Display(states[current_state][S_D], 1);
 	if(states[current_state][S_A] != 0xFF)
 	{
-		DEBUG_TX("Sending alert\r\n");
-		alert_id[0] = states[current_state][S_A]; alert_id[1] = 0x00;
+		alert_id[1] = states[current_state][S_A]; alert_id[0] = 0x00;
+		sprintf(debug_buff, "Sending alert: %x %x       \r\n", alert_id[0], alert_id[1]);
+		DEBUG_TX(debug_buff);
 		Send_Message(f_alert, 2, alert_id, 1, 0);
 	}
 }
@@ -1040,6 +1062,7 @@ void Manage_Send(uint8_t ack, uint8_t beacon)
 				case 7:
 					DEBUG_TX("Manage_Send permanent failure\r\n");
 					Radio_Off();
+					RTC_Delay(300);
 			}
 		}
 	}
@@ -1066,9 +1089,9 @@ void Listen_Radio(void)
 		else if(Rx_Buffer[4] == f_start)
 		{
 			DEBUG_TX("Listen_Radio. Start received\r\n");
-			Send_Message(f_ack, 0, data, 0, 0);
 			current_state = 0;
 			On_NewState();
+			Send_Message(f_ack, 0, data, 0, 0);
 			Set_Wakeup(0);
 		}
 		else if(Rx_Buffer[4] == f_ack)
@@ -1078,9 +1101,9 @@ void Listen_Radio(void)
 		}
 		else
 		{
-			DEBUG_TX("Listen_Radio. Sending ack\r\n");
+			DEBUG_TX("Listen_Radio. Unknown message, sending ack\r\n");
 			Send_Message(f_ack, 0, data, 0, 0);
-			Set_Wakeup(0);
+			Set_Wakeup(1);
 		}
 	}
 	else
@@ -1120,7 +1143,6 @@ void Store_Config(void)
 {
 	uint8_t s, r, i = 0;
 	uint8_t pos = 12;
-	uint8_t old_override = 0;
 	DEBUG_TX("Store_Config\r\n");
 	if(strncmp(Rx_Buffer+pos, "S", 1) == 0)
 	{
@@ -1134,10 +1156,10 @@ void Store_Config(void)
 		for(i=0; i<Rx_Buffer[5]; i++)
 		{
 			screens[s][r][i] = Rx_Buffer[i+pos+4];
-			//sprintf(debug_buff, "%c", screens[s][r][i]);
-			//DEBUG_TX(debug_buff);
+			sprintf(debug_buff, "%c", screens[s][r][i]);
+			DEBUG_TX(debug_buff);
 		}
-		//DEBUG_TX("\r\n");
+		DEBUG_TX("\r\n");
 		//sprintf(debug_buff, "Store_Config, screen: %d, reg: %d, %02x %02x %02x %02x %02x %02x\r\n", s, r, screens[s][r][0], screens[s][r][1], screens[s][r][2], screens[s][r][3], screens[s][r][4], screens[s][r][5]);
 		//DEBUG_TX(debug_buff);
 		config_stored++;
@@ -1151,29 +1173,20 @@ void Store_Config(void)
 	}
 	else if(strncmp(Rx_Buffer+pos, "C", 1) == 0)
 	{
-		old_override = override;
-		override = Rx_Buffer[pos+1];
-		sprintf(debug_buff, "Override updated:%d\r\n", override);
+		app_value = Rx_Buffer[pos+1];
+		sprintf(debug_buff, "Application value updated:%d\r\n", app_value);
 		DEBUG_TX(debug_buff);
-		if(override != old_override)
+		if(states[current_state][S_XV] == app_value)
 		{
-			if(override)
-			{
-				Set_Display(STATE_OVERRIDE, 0);
-				node_state = pressed;
-			}
-			else
-			{
-				Set_Display(STATE_NORMAL, 0);
-				node_state = normal;
-			}
+			current_state = states[current_state][S_XS];
+			On_NewState();
 		}
 	}
 	else if(strncmp(Rx_Buffer+pos, "M", 1) == 0)
 	{
 		DEBUG_TX("State config\r\n");
 		for(i=0; i<64; i++)
-			debug_buff[i] = 0x32;
+			debug_buff[i] = 0x20;
 		s = Rx_Buffer[pos+1];
 		for(i=0; i<16; i++)
 		{
@@ -1320,15 +1333,16 @@ void Load_Normal_Screens(void)
 {
 	// Not very elegant, but it does the job and it shouldn't need to change:
 	int i, s;
-	strcpy(screens[12][0], "F\x02" "Y\x04" "C\x0F" "Welcome to Spur\xFF" "Y\x1A" "C\x0F" "Push here for 3\xFF"
+	strcpy(screens[19][0], "F\x02" "Y\x04" "C\x0F" "Welcome to Spur\xFF" "Y\x1A" "C\x0F" "Push here for 3\xFF"
 			              "Y\x30" "C\x12" "seconds to connect\xFF" "Y\x46" "C\x0A" "to network\xFF" "ES");
-	strcpy(screens[13][0], "F\x03" "Y\x05" "C\x0A" "Connecting\xFF" "Y\x20" "C\x0A" "to network\xFF" "Y\x3D"
+	strcpy(screens[20][0], "F\x03" "Y\x05" "C\x0A" "Connecting\xFF" "Y\x20" "C\x0A" "to network\xFF" "Y\x3D"
 						   "C\x0B" "Please wait\xFF" "ES");
-	strcpy(screens[14][0], "F\x02" "Y\x05" "C\x09" "Connected\xFF" "Y\x20" "C\x0B" "Configuring\xFF" "Y\x3D"
+	strcpy(screens[21][0], "F\x02" "Y\x05" "C\x09" "Connected\xFF" "Y\x20" "C\x0B" "Configuring\xFF" "Y\x3D"
 			              	 "C\x0B" "Please wait\xFF" "ES");
-	strcpy(screens[15][0], "F\x03" "Y\x05" "C\x0D" "Communication\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
+	strcpy(screens[22][0], "F\x03" "Y\x10" "C\x0B" "Spur button\xFF" "Y\x32" "C\x0E" "name not known\xFF" "ES");
+	strcpy(screens[23][0], "F\x03" "Y\x05" "C\x0D" "Communication\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
 		              	  "C\x0A" "Not in use\xFF" "ES");
-	for(s=12; s<16; s++)
+	for(s=19; s<24; s++)
 		for(i=0; i<128; i++)
 			if(screens[s][0][i] == 0xFF)
 				screens[s][0][i] = 0x00;
@@ -1338,7 +1352,7 @@ void Load_Demo_Screens(void)
 {
 	int i, s;
 	strcpy(screens[0][0], "F\x03" "Y\x05" "C\x0B" "This is the\xFF" "Y\x20" "C\x09" "Spur demo\xFF"
-	                	   "Y\x3D" "C\x1D" "push to begin\xFF" "Y\x46" "C\x0A" "to network\xFF" "ES");
+	                	   "Y\x3D" "C\x1D" "push to begin\xFF" "ES");
 	strcpy(screens[1][0], "F\x03" "Y\x10" "C\x0C" "Push here to\xFF" "Y\x32" "C\x0E" "report a fault\xFF" "ES");
 	strcpy(screens[2][0], "F\x03" "Y\x05" "C\x0F" "Fault with this\xFF" "Y\x20" "C\x0D" "appliance has\xFF"
 	                      "Y\x3D" "C\x0D" "been reported\xFF" "ES");
@@ -1380,9 +1394,8 @@ void Load_Demo_Screens(void)
 	strcpy(screens[16][0], "F\x03" "Y\x10" "C\x0D" "AV technician\xFF" "Y\x32" "C\x09" "requested\xFF" "ES");
 	strcpy(screens[17][0], "F\x03" "Y\x05" "C\x05" "An AV\xFF" "Y\x20" "C\x0D" "technician is\xFF"
 			               "Y\x3D" "C\x0C" "on their way\xFF" "ES");
-	strcpy(screens[18][0], "F\x02" "Y\x05" "C\x10" "Push here if the\xFF" "Y\x20" "C\x13" "item you're looking\xFF"
-	    		           "Y\x3D" "C\x13" "for isn't available\xFF" "ES");
-	strcpy(screens[19][0], "F\x03" "Y\x10" "C\x0D" "Thank you for\xFF" "Y\x32" "C\x0D" "your feedback\xFF" "ES");
+	strcpy(screens[18][0], "F\x03" "Y\x10" "C\x0C" "Push here if\xFF" "Y\x32" "C\x09" "you're OK\xFF" "ES");
+	strcpy(screens[19][0], "F\x03" "Y\x05" "C\x0C" "Thanks. I'll\xFF" "Y\x20" "C\x0D" "call you this\xFF" "Y\x3D" "C\x0A" "PM - Peter\xFF" "ES");
 	strcpy(screens[20][0], "F\x02" "Y\x05" "C\x0C" "Push here to\xFF" "Y\x20" "C\x0C" "request more\xFF"
 	      		           "Y\x3D" "C\x0F" "coffee capsules\xFF" "ES");
 	strcpy(screens[21][0], "F\x02" "Y\x05" "C\x0B" "More coffee\xFF" "Y\x20" "C\x0D" "capsules have\xFF"
@@ -1413,12 +1426,9 @@ void Load_Demo_Screens(void)
 	  		               "ES");
 	strcpy(screens[29][0], "F\x02" "Y\x04" "C\x0F" "Low black toner\xFF" "Y\x1A" "C\x08" "reported\xFF"
 	 		               "Y\x30" "C\x12" "Push here if other\xFF" "Y\x46" "C\x14" "printer supplies low\xFF" "ES");
-	strcpy(screens[30][0], "F\x02" "Y\2" "C\x0C" "How were our\xFF" "Y\x16" "C\x11" "facilities today?\xFF"
-			              "X\x08" "Y\x31" "T\x08" "Push for\xFF"
-			  	  	  	  "X\x1A" "Y\x47" "T\x03" "bad\xFF" "X\x6D" "Y\x31" "T\x08" "Push for\xFF" "X\x7E"
-			              "Y\x47" "T\x04" "good\xFF" "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
-			              "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
-	strcpy(screens[31][0], "F\x03" "Y\x10" "C\x0D" "Thank you for\xFF" "Y\x32" "C\x0D" "your feedback\xFF" "ES");
+	strcpy(screens[30][0], "F\x03" "Y\x10" "C\x0C" "Push here if\xFF" "Y\x32" "C\x0D" "you need help\xFF" "ES");
+	strcpy(screens[31][0], "F\x03" "Y\x10" "C\x0D" "I'm on my way\xFF" "Y\x32" "C\x07" "- Sarah\xFF" "ES");
+
 	for(s=0; s<32; s++)
 		for(i=0; i<128; i++)
 			if(screens[s][0][i] == 0xFF)
@@ -1428,35 +1438,15 @@ void Load_Demo_Screens(void)
 void Initialise_States(void)
 {
     //                               S   D    A   LD    LS   MS  MD   RS   RD   XV   XS    W   WS
-	static const uint8_t init[16] = {12, 12, 255,  13, 255, 255,  13, 255,  13, 255, 255, 255, 255}; // Push to Connect
-	static const uint8_t conn[16] = {13, 13, 255, 255, 255, 255, 255, 255, 255,   2,  14, 255, 255}; // Connecting
-	static const uint8_t conf[16] = {14, 14, 255, 255, 255, 255, 255, 255, 255,  13,   0, 255, 255}; // Configuring
-	static const uint8_t prob[16] = {15, 15, 255,  12, 255, 255,  12, 255,  12,  13,   0, 255, 255}; // Comms Problem
+	static const uint8_t init[16] = {19, 19, 255,  20, 255, 255,  20, 255,  20, 255, 255, 255, 255}; // Push to Connect
+	static const uint8_t conn[16] = {20, 20, 255, 255, 255, 255, 255, 255, 255,   2,  21, 255, 255}; // Connecting
+	static const uint8_t conf[16] = {21, 21, 255, 255, 255, 255, 255, 255, 255,  13,   0, 255, 255}; // Configuring
+	static const uint8_t prob[16] = {23, 23, 255,  19, 255, 255,  19, 255,  19,  13,   0, 255, 255}; // Comms Problem
 	memcpy(states[STATE_INITIAL], init, sizeof(init));
 	memcpy(states[STATE_CONNECTING], conn, sizeof(conn));
 	memcpy(states[STATE_CONFIG], conf, sizeof(conf));
 	memcpy(states[STATE_PROBLEM], prob, sizeof(prob));
 }
-
-#ifdef USE_FULL_ASSERT
-
-/**
-   * @brief Reports the name of the source file and the source line number
-   * where the assert_param error has occurred.
-   * @param file: pointer to the source file name
-   * @param line: assert_param error line source number
-   * @retval None
-   */
-void assert_failed(uint8_t* file, uint32_t line)
-{
-  /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-    ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-  /* USER CODE END 6 */
-
-}
-
-#endif
 
 /**
   * @}

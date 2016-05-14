@@ -327,6 +327,42 @@ void ecog_printfc(const uint8_t * font,int16_t y,const char *pstr)
   }
 }
 
+/**************************************************
+ ecog_printfl -    LCD printf with text centering, left half of screen
+ Author:           Peter Claydon
+ Enters:           font
+                   y position
+                   string
+ Exits:            Nothing
+ Date:             28/01/16
+ **************************************************/
+void ecog_printfl(const uint8_t * font,int16_t y,const char *pstr)
+{
+  ecog_position((ECOG_WIDTH/2-ecog_text_width(font,pstr))/2,y);                         /* Position cursor */
+  while(*pstr)                                                                          /* Loop for all characters */
+  {
+    ecog_putchar(font,*pstr++);                                                         /* Write to LCD */
+  }
+}
+
+/**************************************************
+ ecog_printfr -    LCD printf with text centering, right half of screen
+ Author:           Peter Claydon
+ Enters:           font
+                   y position
+                   string
+ Exits:            Nothing
+ Date:             28/01/16
+ **************************************************/
+void ecog_printfr(const uint8_t * font,int16_t y,const char *pstr)
+{
+  ecog_position(ECOG_WIDTH*3/4-(ecog_text_width(font,pstr))/2,y);                           /* Position cursor */
+  while(*pstr)                                                                          /* Loop for all characters */
+  {
+    ecog_putchar(font,*pstr++);                                                         /* Write to LCD */
+  }
+}
+
 
 /******************************************************************************
  ecog_character_width -    Return width of given character and font in pixels
