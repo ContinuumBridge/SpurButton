@@ -38,6 +38,7 @@
 //#define FONT_2 Arial_Narrow16x20
 #define FONT_3 					Arial_Rounded_MT_Bold26x27
 
+#define STATE_SENDING			18
 #define STATE_INITIAL 			19
 #define STATE_CONNECTING 		20
 #define STATE_CONFIG 			21
@@ -52,7 +53,8 @@
 #define SEARCH_ERROR 			2
 #define SEND_OK 				0
 #define SEND_TIMEOUT 			1
-#define MAX_SEARCH_TIME 		6
+#define BEACON_SEARCH_TIME 		10
+#define ACK_SEARCH_TIME         2
 #define ONE_DAY 				(24*60*60)
 #define T_LONG_PRESS          	2
 #define T_RESET_PRESS         	8
@@ -72,6 +74,7 @@
 #define  f_ack                	0x08
 #define  f_beacon             	0x0A
 #define  f_start             	0x0B
+#define	 f_unknown				0x0C
 
 #define RIGHT_SIDE			  	0
 #define LEFT_SIDE			  	1
@@ -107,21 +110,21 @@
 
 #define MODE				  	OPERATIONAL
 
-uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x2F};    // Battery
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x2F};    // Battery
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x0A};  // Development
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x10};  // Brexit
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x11};  // Rolling Demo
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x12};  // Smart IoT Live
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x13};  // Smart IoT 19 Martin's
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x11};  // 17
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x12};  // 18
+uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x13};  // Smart IoT 19 Martin's
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x14};  // Smart IoT 20
 
 char 				debug_buff[64] 		= {0};
-char 				screens[MAX_SCREEN][REGIONS][128];
+char 				screens[MAX_SCREEN][1][194];
 uint8_t				states[24][16]      = {0xFF};
 
 HAL_StatusTypeDef 	status;
 int 				length;
-uint8_t 			Rx_Buffer[128];
+uint8_t 			Rx_Buffer[256];
 uint8_t 			tx_message[64];
 uint8_t 			tx_length;
 uint8_t 			bridge_address[2] 		= {0xFF, 0xFF};
@@ -157,9 +160,9 @@ void Set_Display(uint8_t screen_num, uint8_t turn_on_radio);
 HAL_StatusTypeDef Rx_Message(uint8_t *buffer, int *length, uint16_t timeout);
 void Radio_On(void);
 void Radio_Off(void);
-uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer);
+uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, uint16_t max_search_time);
 void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t ack, uint8_t beacon);
-void Manage_Send(uint8_t ack, uint8_t beacon);
+void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function);
 void Network_Include(void);
 void Listen_Radio(void);
 void Set_Wakeup(uint8_t force_awake);
@@ -788,14 +791,18 @@ void On_NewState(void)
 	uint8_t alert_id[] = {0x00, 0x00};
 	sprintf(debug_buff, "On_NewState, state: %d       \r\n", current_state);
 	DEBUG_TX(debug_buff);
-	if(states[current_state][S_D] != 0xFF)
-		Set_Display(states[current_state][S_D], 1);
 	if(states[current_state][S_A] != 0xFF)
 	{
+		Radio_On();
 		alert_id[1] = states[current_state][S_A]; alert_id[0] = 0x00;
 		sprintf(debug_buff, "Sending alert: %x %x       \r\n", alert_id[0], alert_id[1]);
 		DEBUG_TX(debug_buff);
 		Send_Message(f_alert, 2, alert_id, 1, 0);
+	}
+	else  // If a message is sent, display is changed as part of Manage_Send(), otherwise change here
+	{
+		if(states[current_state][S_D] != 0xFF)
+			Set_Display(states[current_state][S_D], 0);
 	}
 }
 
@@ -832,7 +839,7 @@ void Network_Include(void)
 		include_state = 2;
 	}
 	Radio_On();
-	if(Message_Search(beacon_address, Rx_Buffer) == SEARCH_OK)
+	if(Message_Search(beacon_address, Rx_Buffer, BEACON_SEARCH_TIME) == SEARCH_OK)
 	{
 		bridge_address[0] = Rx_Buffer[2]; bridge_address[1] = Rx_Buffer[3];
 		Send_Message(f_include_req, 4, node_id, 0, 0);
@@ -856,7 +863,7 @@ void Network_Include(void)
 		}
 		return;
 	}
-	if(Message_Search(grant_address, Rx_Buffer) == SEARCH_OK)
+	if(Message_Search(grant_address, Rx_Buffer, BEACON_SEARCH_TIME) == SEARCH_OK)
 	{
 		DEBUG_TX("Received grant\r\n");
 		equal = 1;
@@ -948,7 +955,7 @@ void Radio_On(void)
     HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_SET);
     HAL_UART_MspInit(&huart3);
-    Delay_ms(750);
+    Delay_ms(400);
     HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_RESET);
 }
 
@@ -993,22 +1000,25 @@ void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t 
 	sprintf(debug_buff, "Send_Message: %02x %02x %02x %02x %02x %02x, data length: %d\r\n", tx_message[0], tx_message[1], tx_message[2], tx_message[3], tx_message[4], tx_message[5], data_length);
 	DEBUG_TX(debug_buff);
 	send_attempt = 0;
-	Manage_Send(ack, beacon);
+	Manage_Send(ack, beacon, function);
 }
 
-void Manage_Send(uint8_t ack, uint8_t beacon)
+void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 {
+	static uint8_t local_function;
 	sprintf(debug_buff, "Manage_Send, send_attempt: %d                          \r\n", send_attempt);
 	DEBUG_TX(debug_buff);
 	if(send_attempt == 4)
 		Radio_On();
 	send_attempt++;
+	if(function != f_unknown)
+		local_function = function;
 	while(HAL_GPIO_ReadPin(GPIOB, RADIO_BUSY_Pin == GPIO_PIN_SET))
 	{
 	}
 	if(beacon)
 	{
-		if(Message_Search(beacon_address, Rx_Buffer) == SEARCH_OK)
+		if(Message_Search(beacon_address, Rx_Buffer, BEACON_SEARCH_TIME) == SEARCH_OK)
 		{
 			DEBUG_TX("Manage_Send found beacon\r\n");
 			Send_Delay();
@@ -1026,12 +1036,19 @@ void Manage_Send(uint8_t ack, uint8_t beacon)
 	if(ack)
 	{
 		DEBUG_TX("Manage_Send waiting for ack\r\n");
-		if(Message_Search(node_address, Rx_Buffer) == SEARCH_OK)
+		if(Message_Search(node_address, Rx_Buffer, ACK_SEARCH_TIME) == SEARCH_OK)
 		{
 			if(Rx_Buffer[4] == f_ack)
 			{
 				send_attempt = 0;
 				DEBUG_TX("Manage_Send ack received\r\n");
+				if((states[current_state][S_D] != 0xFF) & (local_function != f_woken_up))
+				{
+					uint32_t wakeup = ((Rx_Buffer[10] << 8) | Rx_Buffer[11]) << 1;
+					if(wakeup != 0)
+						Radio_Off();  // Turn radio off ASAP, before updating display
+					Set_Display(states[current_state][S_D], 0);
+				}
 				Set_Wakeup(0);
 			}
 			else
@@ -1049,11 +1066,13 @@ void Manage_Send(uint8_t ack, uint8_t beacon)
 			switch(send_attempt)
 			{
 				case 1:
+					if (function != f_woken_up)
+						Set_Display(STATE_SENDING, 1);
 				case 2:
 				case 3:
 				case 5:
 				case 6:
-					Manage_Send(1, beacon);
+					Manage_Send(1, beacon, local_function);
 					break;
 				case 4:
 					Radio_Off();
@@ -1061,8 +1080,9 @@ void Manage_Send(uint8_t ack, uint8_t beacon)
 					break;
 				case 7:
 					DEBUG_TX("Manage_Send permanent failure\r\n");
+					Set_Display(STATE_PROBLEM, 0);
 					Radio_Off();
-					RTC_Delay(300);
+					RTC_Delay(600);
 			}
 		}
 	}
@@ -1075,7 +1095,7 @@ void Manage_Send(uint8_t ack, uint8_t beacon)
 void Listen_Radio(void)
 {
 	DEBUG_TX("Listen_Radio\r\n");
-	if(Message_Search(node_address, Rx_Buffer) == SEARCH_OK)
+	if(Message_Search(node_address, Rx_Buffer, ACK_SEARCH_TIME) == SEARCH_OK)
 	{
 		uint8_t data[] = {0x00, 0x00};
 		if(Rx_Buffer[4] == f_config)
@@ -1149,22 +1169,22 @@ void Store_Config(void)
 		s = Rx_Buffer[pos+1];
 		if(strncmp(Rx_Buffer+pos+2, "R", 1) == 0)
 			r = Rx_Buffer[pos+3];
-		sprintf(debug_buff, "Screen: %d, region: %d\r\n", s, r);
-		DEBUG_TX(debug_buff);
-		for(i=0; i<64; i++)
-			debug_buff[i] = 0;
+		//sprintf(debug_buff, "Screen: %d, region: %d\r\n", s, r);
+		//DEBUG_TX(debug_buff);
+		//for(i=0; i<64; i++)
+		//	debug_buff[i] = 0;
 		for(i=0; i<Rx_Buffer[5]; i++)
 		{
 			screens[s][r][i] = Rx_Buffer[i+pos+4];
-			sprintf(debug_buff, "%c", screens[s][r][i]);
-			DEBUG_TX(debug_buff);
+			//sprintf(debug_buff, "%c", screens[s][r][i]);
+			//DEBUG_TX(debug_buff);
 		}
 		DEBUG_TX("\r\n");
 		//sprintf(debug_buff, "Store_Config, screen: %d, reg: %d, %02x %02x %02x %02x %02x %02x\r\n", s, r, screens[s][r][0], screens[s][r][1], screens[s][r][2], screens[s][r][3], screens[s][r][4], screens[s][r][5]);
 		//DEBUG_TX(debug_buff);
 		config_stored++;
-		sprintf(debug_buff, "Store_Config, config_stored: %d\r\n", config_stored);
-		DEBUG_TX(debug_buff);
+		//sprintf(debug_buff, "Store_Config, config_stored: %d\r\n", config_stored);
+		//DEBUG_TX(debug_buff);
 		if(s == current_screen)
 		{
 			DEBUG_TX("Store_Config. Current screen updated\r\n");
@@ -1192,16 +1212,18 @@ void Store_Config(void)
 		{
 			states[s][i] = Rx_Buffer[i+pos+1];
 		}
+		/*
 		for(i=0; i<16; i++)
 		{
 			sprintf(debug_buff, "%x ", states[s][i]);
 		 	DEBUG_TX(debug_buff);
 		 	DEBUG_TX("\r\n");
 		}
+		*/
 	}
 }
 
-uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer)
+uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, uint16_t max_search_time)
 {
 	int search_start = Cbr_Now();
 	sprintf(debug_buff, "Message_Search, address: %02x %02x\r\n", address[0], address[1]);
@@ -1209,16 +1231,20 @@ uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer)
 	while (1)
 	{
 		__HAL_UART_FLUSH_DRREGISTER(&huart3);
-		status = Rx_Message(Rx_Buffer, &length, 2000);
+		if(current_state != STATE_INITIAL) // So we can display "sending" message if there is no immediate ack
+			status = Rx_Message(Rx_Buffer, &length, 1000);
+		else
+			status = Rx_Message(Rx_Buffer, &length, 6000);
 		if (status == HAL_OK)
 		{
-			sprintf(debug_buff, "MS Rx: %02x %02x %02x %02x %02x %02x, Length: %d\r\n", Rx_Buffer[0], Rx_Buffer[1], Rx_Buffer[2], Rx_Buffer[3], Rx_Buffer[4], Rx_Buffer[5], length);
+			sprintf(debug_buff, "MS Rx: %02x %02x %02x %02x %02x %02x %02x %02x, Length: %d\r\n", Rx_Buffer[0], Rx_Buffer[1],
+								Rx_Buffer[2], Rx_Buffer[3], Rx_Buffer[4], Rx_Buffer[5], Rx_Buffer[10], Rx_Buffer[11], length);
 			DEBUG_TX(debug_buff);
 			if((Rx_Buffer[0] == address[0]) & (Rx_Buffer[1] == address[1]))
 			{
 				return SEARCH_OK;
 			}
-			if ((Cbr_Now() - search_start) > MAX_SEARCH_TIME)
+			if ((Cbr_Now() - search_start) > max_search_time)
 			{
 				DEBUG_TX("Message_Search timeout\r\n");
 				return SEARCH_TIMEOUT;
@@ -1228,9 +1254,9 @@ uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer)
 		{
 			__HAL_UART_FLUSH_DRREGISTER(&huart3);
 			DEBUG_TX("Message_Search status != HAL_OK\r\n");
-			if ((Cbr_Now() - search_start) > MAX_SEARCH_TIME)
+			if ((Cbr_Now() - search_start) > max_search_time)
 			{
-				DEBUG_TX("Message_Search error\r\n");
+				DEBUG_TX("Message_Search 2nd timeout error\r\n");
 				return SEARCH_ERROR;
 			}
 		}
@@ -1319,11 +1345,11 @@ void On_RTC_IRQ(void)
 		Network_Include();
 	}
 	else if(send_attempt == 4)
-		Manage_Send(1, 0);
+		Manage_Send(1, 0, f_unknown);
 	else
 	{
 		DEBUG_TX("Woken up\r\n");
-		Delay_ms(100);
+		Radio_On();
 		uint8_t data[] = {0x00, 0x00};
 		Send_Message(f_woken_up, 0, data, 1, 0);
 	}
@@ -1333,6 +1359,7 @@ void Load_Normal_Screens(void)
 {
 	// Not very elegant, but it does the job and it shouldn't need to change:
 	int i, s;
+	strcpy(screens[18][0], "F\x03" "Y\x10" "C\x04" "Spur\xFF" "Y\x32" "C\x0B" "Sending ...\xFF" "ES");
 	strcpy(screens[19][0], "F\x02" "Y\x04" "C\x0F" "Welcome to Spur\xFF" "Y\x1A" "C\x0F" "Push here for 3\xFF"
 			              "Y\x30" "C\x12" "seconds to connect\xFF" "Y\x46" "C\x0A" "to network\xFF" "ES");
 	strcpy(screens[20][0], "F\x03" "Y\x05" "C\x0A" "Connecting\xFF" "Y\x20" "C\x0A" "to network\xFF" "Y\x3D"
@@ -1342,7 +1369,7 @@ void Load_Normal_Screens(void)
 	strcpy(screens[22][0], "F\x03" "Y\x10" "C\x0B" "Spur button\xFF" "Y\x32" "C\x0E" "name not known\xFF" "ES");
 	strcpy(screens[23][0], "F\x03" "Y\x05" "C\x0D" "Communication\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
 		              	  "C\x0A" "Not in use\xFF" "ES");
-	for(s=19; s<24; s++)
+	for(s=18; s<24; s++)
 		for(i=0; i<128; i++)
 			if(screens[s][0][i] == 0xFF)
 				screens[s][0][i] = 0x00;
