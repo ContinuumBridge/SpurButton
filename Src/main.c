@@ -58,6 +58,7 @@
 #define ONE_DAY 				(24*60*60)
 #define T_LONG_PRESS          	2
 #define T_RESET_PRESS         	8
+#define T_MAX_RESET_PRESS		20  // To catch failure case
 
 #define MAX_SCREEN 32
 #define REGIONS 2
@@ -110,12 +111,12 @@
 
 #define MODE				  	OPERATIONAL
 
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x2F};    // Battery
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x2F};    // Battery 47
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x0A};  // Development
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x10};  // Brexit
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x11};  // 17
+uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x11};  // 17
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x12};  // 18
-uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x13};  // Smart IoT 19 Martin's
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x13};  // Smart IoT 19 Martin's
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x14};  // Smart IoT 20
 
 char 				debug_buff[64] 		= {0};
@@ -679,7 +680,7 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin, 	GPIO_PinState button_state)
 		{
 			last_action_pressed[i] = 0;
 		}
-		if(pressed_time > T_RESET_PRESS)
+		if((pressed_time > T_RESET_PRESS) & (pressed_time < T_MAX_RESET_PRESS))
 		{
 			DEBUG_TX("System reset\r\n");
 			NVIC_SystemReset();
@@ -1071,6 +1072,7 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 				case 2:
 				case 3:
 				case 5:
+					Send_Delay();
 				case 6:
 					Manage_Send(1, beacon, local_function);
 					break;
@@ -1094,9 +1096,11 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 
 void Listen_Radio(void)
 {
+	static uint8_t fail_count = 0;
 	DEBUG_TX("Listen_Radio\r\n");
 	if(Message_Search(node_address, Rx_Buffer, ACK_SEARCH_TIME) == SEARCH_OK)
 	{
+		fail_count = 0;
 		uint8_t data[] = {0x00, 0x00};
 		if(Rx_Buffer[4] == f_config)
 		{
@@ -1127,8 +1131,20 @@ void Listen_Radio(void)
 		}
 	}
 	else
+	{
 		DEBUG_TX("Listen_Radio. Search failed\r\n");
-		Set_Wakeup(0);
+		if(fail_count < 4)
+		{
+			fail_count++;
+			Set_Wakeup(0);
+		}
+		else  // Catches case where we miss an ack and last wakeup was 0
+		{
+			fail_count = 0;
+			Radio_Off();
+			RTC_Delay(30);
+		}
+	}
 }
 
 void Set_Wakeup(uint8_t force_awake)
@@ -1232,14 +1248,14 @@ uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, uint16_t max_search
 	{
 		__HAL_UART_FLUSH_DRREGISTER(&huart3);
 		if(current_state != STATE_INITIAL) // So we can display "sending" message if there is no immediate ack
-			status = Rx_Message(Rx_Buffer, &length, 1000);
+			status = Rx_Message(Rx_Buffer, &length, 1500);
 		else
 			status = Rx_Message(Rx_Buffer, &length, 6000);
 		if (status == HAL_OK)
 		{
-			sprintf(debug_buff, "MS Rx: %02x %02x %02x %02x %02x %02x %02x %02x, Length: %d\r\n", Rx_Buffer[0], Rx_Buffer[1],
-								Rx_Buffer[2], Rx_Buffer[3], Rx_Buffer[4], Rx_Buffer[5], Rx_Buffer[10], Rx_Buffer[11], length);
-			DEBUG_TX(debug_buff);
+			//sprintf(debug_buff, "MS Rx: %02x %02x %02x %02x %02x %02x %02x %02x, Length: %d\r\n", Rx_Buffer[0], Rx_Buffer[1],
+			//					Rx_Buffer[2], Rx_Buffer[3], Rx_Buffer[4], Rx_Buffer[5], Rx_Buffer[10], Rx_Buffer[11], length);
+			//DEBUG_TX(debug_buff);
 			if((Rx_Buffer[0] == address[0]) & (Rx_Buffer[1] == address[1]))
 			{
 				return SEARCH_OK;
@@ -1320,11 +1336,10 @@ void RTC_TimeShow(void)
 void Send_Delay(void)
 {
 	/*
-	At 1 Kbps it takes 16*8 = 128 ms to send a message, but there is overhead,
-	so assume 4 messages per second.
-	We need a number between 0 and 3 for the delay, x 250 ms.
+	At 1 Kbps it takes 16*8 = 128 ms to send a message.
+	Delay between 0 and 3 x 128 ms.
 	*/
-	uint32_t delay = (Cbr_Now() & 0x3) * 250;
+	uint32_t delay = (Cbr_Now() & 0x3) * 128;
 	sprintf(debug_buff,"Send_Delay: %d\r\n", (int)delay);
 	DEBUG_TX(debug_buff);
 	Delay_ms(delay);
