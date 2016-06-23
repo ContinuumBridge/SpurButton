@@ -114,10 +114,14 @@
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x2F};    // Battery 47
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x0A};  // Development
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x10};  // Brexit
-uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x11};  // 17
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x11};  // 17
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x12};  // 18
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x13};  // Smart IoT 19 Martin's
 //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x14};  // Smart IoT 20
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x15};  // Smart IoT 21
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x16};  // Smart IoT 22
+//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x17};  // 23
+uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x18};  // 24
 
 char 				debug_buff[64] 		= {0};
 char 				screens[MAX_SCREEN][1][194];
@@ -135,20 +139,19 @@ uint8_t 			grant_address[] 		= {0xBB, 0x00};
 
 int 				radio_ready   			= SET;
 int 				screen_num 				= 0;
+uint8_t 			button_irq				= 0;
 RTC_HandleTypeDef 	hrtc;
 uint8_t 			include_state 			= 0;
 uint8_t 			send_attempt 			= 0;
 uint8_t 			config_stored 			= 0;
 uint8_t 			app_value 				= 0;
 uint8_t 			current_screen 			= 0;
-uint8_t 			button_irq 				= 0;
 uint8_t 			rtc_irq					= 0;
 uint16_t 			pressed_button;
 uint8_t 			running 				= 0;
 GPIO_PinState  		button_state;
 uint8_t				current_state			= STATE_INITIAL;
 uint32_t			button_press_time[2] 	= {0, 0};
-uint8_t 			last_action_pressed[2] 	= {0, 0};
 
 typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
@@ -179,6 +182,7 @@ void On_RTC_IRQ(void);
 void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state);
 void Initialise_States(void);
 void On_NewState(void);
+void Send_Battery();
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -238,11 +242,11 @@ int main(void)
   HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
-  HAL_ADC_MspDeInit(&hadc);
-
+  HAL_ADC_DeInit(&hadc);
   HAL_DBGMCU_DisableDBGStopMode();
 
   DEBUG_TX("Hello Computer\r\n");
+  HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_SET);
   Load_Normal_Screens();
   Initialise_States();
   ecog_init();
@@ -336,8 +340,6 @@ int main(void)
 			  On_RTC_IRQ();
 	  }
 	  button_irq = 0;
-	  //Radio_Off();
-	  //Delay_ms(100);
 	  HAL_UART_MspDeInit(&huart1);
 	  //HAL_PWR_EnterSTANDBYMode();
 	  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
@@ -645,15 +647,20 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin, 	GPIO_PinState button_state)
 	button_state = HAL_GPIO_ReadPin(GPIOA, GPIO_Pin);
 	if (button_state == GPIO_PIN_RESET)
 	{
-		last_action_pressed[side] = 1;
 		if(en_double)
 		{
 			if((now - button_press_time[side]) < 2)
 			{
 				if(side == LEFT_SIDE)
+				{
+					//button_press_time[side] = now;  // So that we can catch long presses
 					return PRESS_LEFT_DOUBLE;
+				}
 				else
+				{
+					//button_press_time[side] = now;  // So that we can catch long presses
 					return PRESS_RIGHT_DOUBLE;
+				}
 			}
 			button_press_time[side] = now;
 			return PRESS_NONE;
@@ -669,17 +676,7 @@ uint8_t On_Button_Press(uint16_t GPIO_Pin, 	GPIO_PinState button_state)
 	}
 	else if(button_state == GPIO_PIN_SET)
 	{
-		now = Cbr_Now();
-		if(last_action_pressed[side])
-		{
-			pressed_time = now - button_press_time[side];
-		}
-		else
-			pressed_time = 1;   // In case a down-press was missed. This gives most transparent result
-		for(i=0; i<2; i++)
-		{
-			last_action_pressed[i] = 0;
-		}
+		pressed_time = now - button_press_time[side];
 		if((pressed_time > T_RESET_PRESS) & (pressed_time < T_MAX_RESET_PRESS))
 		{
 			DEBUG_TX("System reset\r\n");
@@ -734,6 +731,7 @@ void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state)
 			Radio_Off();
 			Load_Demo_Screens();
 			screen_num = 0;
+			button_irq = 0;
 			Set_Display(0, 0);
 			current_state = STATE_DEMO;
 			return;
@@ -749,6 +747,7 @@ void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state)
 			screen_num++;
 		if (screen_num == MAX_SCREEN)
 			screen_num = 0;
+		button_irq = 0;
 		Set_Display(screen_num, 0);
 		if ((screen_num == 9) || (screen_num == 16) || (screen_num == 23))
 		{
@@ -795,6 +794,7 @@ void On_NewState(void)
 	if(states[current_state][S_A] != 0xFF)
 	{
 		Radio_On();
+		button_irq = 0;  // So other functions can check if it's been pressed again
 		alert_id[1] = states[current_state][S_A]; alert_id[0] = 0x00;
 		sprintf(debug_buff, "Sending alert: %x %x       \r\n", alert_id[0], alert_id[1]);
 		DEBUG_TX(debug_buff);
@@ -1118,6 +1118,13 @@ void Listen_Radio(void)
 			Send_Message(f_ack, 0, data, 0, 0);
 			Set_Wakeup(0);
 		}
+		else if(Rx_Buffer[4] == f_send_battery)
+		{
+			DEBUG_TX("Listen_Radio. Send battery received\r\n");
+			Send_Message(f_ack, 0, data, 0, 0);
+			Send_Battery();
+			Set_Wakeup(0);
+		}
 		else if(Rx_Buffer[4] == f_ack)
 		{
 			DEBUG_TX("Listen_Radio. Ack received\r\n");
@@ -1147,13 +1154,14 @@ void Listen_Radio(void)
 	}
 }
 
-void Set_Wakeup(uint8_t force_awake)
+void Set_Wakeup(uint8_t error)
 {
 	DEBUG_TX("Set_Wakeup\r\n");
-	if(force_awake)
+	if(error)
 	{
-		DEBUG_TX("Set_Wakeup, force_awake\r\n");
-		Listen_Radio();
+		DEBUG_TX("Set_Wakeup, error\r\n");
+		Radio_Off();    // Just in case
+		RTC_Delay(30);  // On error wake up in 30 secs, when woken_up will be sent, resetting communications
 	}
 	else
 	{
@@ -1238,6 +1246,45 @@ void Store_Config(void)
 		*/
 	}
 }
+
+void Send_Battery()
+{
+	uint32_t adc_value = 0x55;
+	uint8_t alert[] = {0x02, 0x00};
+	MX_ADC_Init();
+	HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_SET);
+	Delay_ms(100);
+	if(HAL_ADC_Start(&hadc) != HAL_OK)
+	{
+		DEBUG_TX("ADC start error\r\n");
+		HAL_ADC_DeInit(&hadc);
+		HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
+		return;
+	}
+	if(HAL_ADC_PollForConversion(&hadc, 50) != HAL_OK)
+	{
+		DEBUG_TX("ADC conversion error\r\n");
+		HAL_ADC_Stop(&hadc);
+		HAL_ADC_DeInit(&hadc);
+		HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
+	}
+	else
+	{
+		adc_value = HAL_ADC_GetValue(&hadc);
+		HAL_ADC_Stop(&hadc);
+		HAL_ADC_DeInit(&hadc);
+		HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
+		sprintf(debug_buff, "ADC battery value: %x\r\n", (int)adc_value);
+		DEBUG_TX(debug_buff);
+		alert[1] = adc_value >> 8;
+		sprintf(debug_buff, "Sending alert: %x %x       \r\n", alert[0], alert[1]);
+		DEBUG_TX(debug_buff);
+		Send_Message(f_alert, 2, alert, 1, 0);
+	}
+
+	return;
+}
+
 
 uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, uint16_t max_search_time)
 {
@@ -1374,14 +1421,14 @@ void Load_Normal_Screens(void)
 {
 	// Not very elegant, but it does the job and it shouldn't need to change:
 	int i, s;
-	strcpy(screens[18][0], "F\x03" "Y\x10" "C\x04" "Spur\xFF" "Y\x32" "C\x0B" "Sending ...\xFF" "ES");
+	strcpy(screens[18][0], "F\x03" "Y\x10" "C\x07" "Sending\xFF" "Y\x32" "C\x0F" "Please wait ...\xFF" "ES");
 	strcpy(screens[19][0], "F\x02" "Y\x04" "C\x0F" "Welcome to Spur\xFF" "Y\x1A" "C\x0F" "Push here for 3\xFF"
 			              "Y\x30" "C\x12" "seconds to connect\xFF" "Y\x46" "C\x0A" "to network\xFF" "ES");
 	strcpy(screens[20][0], "F\x03" "Y\x05" "C\x0A" "Connecting\xFF" "Y\x20" "C\x0A" "to network\xFF" "Y\x3D"
 						   "C\x0B" "Please wait\xFF" "ES");
 	strcpy(screens[21][0], "F\x02" "Y\x05" "C\x09" "Connected\xFF" "Y\x20" "C\x0B" "Configuring\xFF" "Y\x3D"
 			              	 "C\x0B" "Please wait\xFF" "ES");
-	strcpy(screens[22][0], "F\x03" "Y\x10" "C\x0B" "Spur button\xFF" "Y\x32" "C\x0E" "name not known\xFF" "ES");
+	strcpy(screens[22][0], "F\x02" "Y\x10" "C\x0B" "Spur button\xFF" "Y\x32" "C\x0E" "name not known\xFF" "ES");
 	strcpy(screens[23][0], "F\x03" "Y\x05" "C\x0D" "Communication\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
 		              	  "C\x0A" "Not in use\xFF" "ES");
 	for(s=18; s<24; s++)
