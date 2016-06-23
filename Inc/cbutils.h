@@ -46,6 +46,9 @@
 #define SPI_TXRX(TXMESSAGE, RXMESSAGE, LENGTH)  (SPI_TxRx(&hspi1, (uint8_t*)TXMESSAGE, (uint8_t*)RXMESSAGE, LENGTH))
 #define UART1_Write_Text(MESSAGE) (Debug_Tx(&huart1, (uint8_t*)MESSAGE, (COUNTOF(MESSAGE) - 1)))
 
+ extern uint8_t 			button_irq;
+ extern char 				debug_buff[64];
+
 void *array_concat(const void *a, size_t an, const void *b, size_t bn, size_t s);
 void Radio_Tx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size);
 void Debug_Tx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size);

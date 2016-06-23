@@ -327,6 +327,42 @@ void ecog_printfc(const uint8_t * font,int16_t y,const char *pstr)
   }
 }
 
+/**************************************************
+ ecog_printfl -    LCD printf with text centering, left half of screen
+ Author:           Peter Claydon
+ Enters:           font
+                   y position
+                   string
+ Exits:            Nothing
+ Date:             28/01/16
+ **************************************************/
+void ecog_printfl(const uint8_t * font,int16_t y,const char *pstr)
+{
+  ecog_position((ECOG_WIDTH/2-ecog_text_width(font,pstr))/2,y);                         /* Position cursor */
+  while(*pstr)                                                                          /* Loop for all characters */
+  {
+    ecog_putchar(font,*pstr++);                                                         /* Write to LCD */
+  }
+}
+
+/**************************************************
+ ecog_printfr -    LCD printf with text centering, right half of screen
+ Author:           Peter Claydon
+ Enters:           font
+                   y position
+                   string
+ Exits:            Nothing
+ Date:             28/01/16
+ **************************************************/
+void ecog_printfr(const uint8_t * font,int16_t y,const char *pstr)
+{
+  ecog_position(ECOG_WIDTH*3/4-(ecog_text_width(font,pstr))/2,y);                           /* Position cursor */
+  while(*pstr)                                                                          /* Loop for all characters */
+  {
+    ecog_putchar(font,*pstr++);                                                         /* Write to LCD */
+  }
+}
+
 
 /******************************************************************************
  ecog_character_width -    Return width of given character and font in pixels
@@ -925,6 +961,10 @@ uint8_t ecog_write_border(void)
   uint8_t scan;                                                                         /* Scan data loop counter */
   uint8_t db;                                                                           /* Data byte loop counter */
 
+  //sprintf(debug_buff, "ecog_write_border, button_irq: %d\r\n", button_irq);
+  //DEBUG_TX(debug_buff);
+  //if(button_irq)
+  //	return 0;
   check_busy();                                                                         /* Ensure we're not busy */
   ecog_send(0x70);                                                                      /* Set index command */
   ecog_single(0x0a);                                                                    /* Send index */
@@ -945,6 +985,8 @@ uint8_t ecog_write_border(void)
   ECOG_CS_OFF;                                                                          /* Disable chip */
   ecog_write(0x02,0x07);                                                                /* Turn on output enable */
   //timers_sdelay(300);
+  //if(button_irq)
+  //	  return 0;
   timers_sdelay(150);
 }
 
@@ -1024,7 +1066,7 @@ uint8_t ecog_update_display(uint8_t powered, uint8_t turn_on_radio)
     //UART1_Write_Text("Writing screen data\r\n");
     ecog_write_screen_data();                                                           /* Write screen buffer data */
     //UART1_Write_Text("Writing nothing frame\r\n");
-    ecog_write_nothing_frame();                                                         /* Write nothing frame to stabalize display */
+    ecog_write_nothing_frame();                                                         /* Write nothing frame to stabilise display */
     //UART1_Write_Text("Writing border frame\r\n");
     ecog_write_border();                                                                /* Write border data */
     //UART1_Write_Text("Discharging capacitors\r\n");
