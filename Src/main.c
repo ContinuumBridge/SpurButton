@@ -25,6 +25,8 @@
 #include "process.h"
 #include "define.h"       // Display drivers
 #include "glue.h"
+#include "load_screens.h"
+#include "nodeid.h"
 
 /* USER CODE END Includes */
 
@@ -33,15 +35,18 @@
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
 //#define CB_DEMO_0
-//#define FONT_1 Verdana_Pro_SemiBold18x16
-#define FONT_2 					Arial_Rounded_MT_Bold19x20
+//#define FONT_2 					Arial_Rounded_MT_Bold19x20
+//#define FONT_2 						Arial_Narrow16x23
+#define FONT_2 					Arial_Narrow14x20
 //#define FONT_2 Arial_Narrow16x20
-#define FONT_3 					Arial_Rounded_MT_Bold26x27
+//#define FONT_3 					Arial_Rounded_MT_Bold26x27
+#define FONT_3 					Arial_Narrow18x26
 
 #define STATE_SENDING			18
 #define STATE_INITIAL 			19
 #define STATE_CONNECTING 		20
 #define STATE_CONFIG 			21
+#define STATE_START 			22
 #define STATE_PROBLEM 			23
 #define STATE_DEMO				25
 #define STATE_NORMAL 			1
@@ -53,14 +58,14 @@
 #define SEARCH_ERROR 			2
 #define SEND_OK 				0
 #define SEND_TIMEOUT 			1
-#define BEACON_SEARCH_TIME 		10
-#define ACK_SEARCH_TIME         2
+#define BEACON_SEARCH_TIME 		10   // Units: 1 second
+#define ACK_SEARCH_TIME         3    // Units: 1 second
 #define ONE_DAY 				(24*60*60)
-#define T_LONG_PRESS          	2
-#define T_RESET_PRESS         	8
-#define T_MAX_RESET_PRESS		20  // To catch failure case
+#define T_LONG_PRESS          	2    // Units: 1 second
+#define T_DOUBLE_PRESS_16		8   // Units: 1/16 second
+#define T_RESET_PRESS         	8    // Units: 1 second
+#define T_MAX_RESET_PRESS		20   // To catch failure case
 
-#define MAX_SCREEN 32
 #define REGIONS 2
 
 // Function codes:
@@ -89,6 +94,8 @@
 #define PRESS_RESET           	6
 #define PRESS_NONE            	7
 #define PRESS_DEMO	  		  	8
+#define BUTTON_NOT_PRESSED		0
+#define BUTTON_PRESSED			1
 
 #define OPERATIONAL			  	0
 #define RATE				  	1
@@ -111,21 +118,11 @@
 
 #define MODE				  	OPERATIONAL
 
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x2F};    // Battery 47
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x0A};  // Development
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x10};  // Brexit
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x11};  // 17
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x12};  // 18
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x13};  // Smart IoT 19 Martin's
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x14};  // Smart IoT 20
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x15};  // Smart IoT 21
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x16};  // Smart IoT 22
-//uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x17};  // 23
-uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x18};  // 24
+uint8_t 			node_id[] 				= {0x00, 0x00, 0x00, 0x00};
 
-char 				debug_buff[64] 		= {0};
+char 				debug_buff[64] 			= {0};
 char 				screens[MAX_SCREEN][1][194];
-uint8_t				states[24][16]      = {0xFF};
+uint8_t				states[24][16]     		= {0xFF};
 
 HAL_StatusTypeDef 	status;
 int 				length;
@@ -139,6 +136,7 @@ uint8_t 			grant_address[] 		= {0xBB, 0x00};
 
 int 				radio_ready   			= SET;
 int 				screen_num 				= 0;
+int					side					= 0;
 uint8_t 			button_irq				= 0;
 RTC_HandleTypeDef 	hrtc;
 uint8_t 			include_state 			= 0;
@@ -151,7 +149,11 @@ uint16_t 			pressed_button;
 uint8_t 			running 				= 0;
 GPIO_PinState  		button_state;
 uint8_t				current_state			= STATE_INITIAL;
-uint32_t			button_press_time[2] 	= {0, 0};
+int32_t				button_press_time[2] 	= {-100, -100};
+uint32_t			last_press_sixteenths[2] = {0, 0};
+uint8_t				last_action_reset[2]    = {0, 0};
+uint8_t				stop_mode				= 1;
+uint8_t				start_from_reset		= 1;
 
 typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
@@ -160,29 +162,29 @@ NodeState         node_state           = initial;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void Set_Display(uint8_t screen_num, uint8_t turn_on_radio);
+void Set_Display(uint8_t screen_num);
 HAL_StatusTypeDef Rx_Message(uint8_t *buffer, int *length, uint16_t timeout);
-void Radio_On(void);
+void Radio_On(int delay);
+void Host_Ready(void);
 void Radio_Off(void);
 uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, uint16_t max_search_time);
 void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t ack, uint8_t beacon);
 void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function);
 void Network_Include(void);
-void Listen_Radio(void);
+void Listen_Radio(uint8_t reset_fail_count);
 void Set_Wakeup(uint8_t force_awake);
 void Build_Screen(uint8_t screen_num);
 void Store_Config(void);
-void Load_Normal_Screens(void);
-void Load_Demo_Screens(void);
 static void SYSCLKConfig_STOP(void);
 static void SystemPower_Config(void);
 void Send_Delay(void);
 void Power_Down(void);
 void On_RTC_IRQ(void);
-void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state);
+void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState button_state);
 void Initialise_States(void);
 void On_NewState(void);
-void Send_Battery();
+void Read_Battery(uint8_t send);
+
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -198,6 +200,7 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
   int  i;
+
   /* USER CODE END 1 */
 
   /* MCU Configuration----------------------------------------------------------*/
@@ -207,6 +210,7 @@ int main(void)
 
   /* Configure the system clock */
   SystemClock_Config();
+  SYSCLKConfig_STOP();
   SystemPower_Config();
 
   /* Initialize all configured peripherals */
@@ -216,9 +220,11 @@ int main(void)
   //MX_SPI1_Init();
   MX_USART1_UART_Init();
   MX_USART3_UART_Init();
+  DWT_Init();
 
   /* USER CODE BEGIN 2 */
 
+  Set_Node_ID(node_id);
   // Set pins for display
   GPIO_InitTypeDef GPIO_InitStruct;
   GPIO_InitStruct.Pin = GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7;
@@ -242,40 +248,34 @@ int main(void)
   HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
-  HAL_ADC_DeInit(&hadc);
   HAL_DBGMCU_DisableDBGStopMode();
 
-  DEBUG_TX("Hello Computer\r\n");
-  HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_SET);
+  DEBUG_TX("Hello Computer\r\n\0");
+  /*
+  while(1)
+  {
+	  Delay_ms(62);
+	  uint32_t sixteenths_now = SIXTEENTHS_NOW;
+	  sprintf(debug_buff,"now: %d\r\n\0", (int)sixteenths_now);
+	  DEBUG_TX(debug_buff);
+	  Delay_ms(63);
+	  sprintf(debug_buff,"now: %d\r\n\0", (int)sixteenths_now);
+	  DEBUG_TX(debug_buff);
+  }
+  */
+  Read_Battery(0);
+
   Load_Normal_Screens();
   Initialise_States();
   ecog_init();
 
-  Radio_On();
-  /*
-   RADIO_TXS("ER_CMD#D0", 9);
-   status = Rx_Message(Rx_Buffer, &length, 3000);
-   DEBUG_TX("Received: ");
-   DEBUG_TXS(Rx_Buffer, 9);
-   DEBUG_TX("\r\n");
-   Delay_ms(100);
-   RADIO_TXS("ACK", 3);
-   Delay_ms(200);
-   RADIO_TXS("ER_CMD#d0", 9);
-   status = Rx_Message(Rx_Buffer, &length, 3000);
-   DEBUG_TX("Received: ");
-   DEBUG_TXS(Rx_Buffer, 9);
-   DEBUG_TX("\r\n");
-   Delay_ms(100);
-   RADIO_TXS("ACK", 3);
-   Delay_ms(200);
-  */
   // Reset radio
+  Radio_On(1);
   RADIO_TXS("ER_CMD#R0", 9);
   status = Rx_Message(Rx_Buffer, &length, 3000);
   DEBUG_TX("Received: ");
   DEBUG_TXS(Rx_Buffer, 9);
-  DEBUG_TX("\r\n");
+  DEBUG_TX("\r\n\0");
   Delay_ms(100);
   RADIO_TXS("ACK", 3);
   Delay_ms(200);
@@ -285,14 +285,13 @@ int main(void)
   status = Rx_Message(Rx_Buffer, &length, 3000);
   DEBUG_TX("Received: ");
   DEBUG_TXS(Rx_Buffer, 9);
-  DEBUG_TX("\r\n");
+  DEBUG_TX("\r\n\0");
   Delay_ms(100);
   RADIO_TXS("ACK", 3);
   Delay_ms(200);
 
-  Radio_On();
   RADIO_TXS("Hello World", 11);
-  DEBUG_TX("Sent Hello World\r\n");
+  DEBUG_TX("Sent Hello World\r\n\0");
   Delay_ms(50);
   for (i=0; i<128; i++)
 	  Rx_Buffer[i] = 45;
@@ -301,17 +300,18 @@ int main(void)
   {
 	  DEBUG_TX("Received: ");
 	  DEBUG_TXS(Rx_Buffer, 32);
-	  DEBUG_TX("\r\n");
+	  DEBUG_TX("\r\n\0");
 	  sprintf(debug_buff, "Length %d\r\n", length);
 	  DEBUG_TX(debug_buff);
   }
   else
-  	  DEBUG_TX("Receive problem\r\n");
-
+  	  DEBUG_TX("Receive problem\r\n\0");
   Radio_Off();
-  Set_Display(STATE_INITIAL, 0);
+
+  Set_Display(STATE_INITIAL);
+  Radio_Off();
+  DEBUG_TX("Waiting\r\n\0");
   HAL_UART_MspDeInit(&huart1);
-  //HAL_SuspendTick();
   HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
 
   /* USER CODE END 2 */
@@ -322,27 +322,49 @@ int main(void)
   {
 	  /* Configures system clock after wake-up from STOP: enable HSE, PLL and select
 	  PLL as system clock source (HSE and PLL are disabled in STOP mode) */
-	  SYSCLKConfig_STOP();
-	  HAL_UART_MspInit(&huart1);
-	  DEBUG_TX("Main loop\r\n");
+	  if(stop_mode)
+	  {
+		  SYSCLKConfig_STOP();
+		  HAL_UART_MspInit(&huart1);
+		  DEBUG_TX("*** Main loop ***\r\n\0");
+	  }
 	  if(button_irq)
 	  {
-		  //DEBUG_TX("Button IRQ\r\n");
-		  On_Button_IRQ(pressed_button, button_state);
+		  On_Button_IRQ(BUTTON_PRESSED, pressed_button, button_state);
+		  button_irq = 0;
 	  }
 	  else if(rtc_irq)
 	  {
 		  rtc_irq = 0;
-		  DEBUG_TX("RTC IRQ\r\n");
-		  if(MODE == ROLLING_DEMO)
-			  On_Button_IRQ(ROLLING_DEMO_PIN, button_state);
-		  else
-			  On_RTC_IRQ();
+		  DEBUG_TX("RTC IRQ\r\n\0");
+		  On_RTC_IRQ();
 	  }
-	  button_irq = 0;
-	  HAL_UART_MspDeInit(&huart1);
-	  //HAL_PWR_EnterSTANDBYMode();
-	  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+	  else if(!stop_mode)
+	  {
+		  uint32_t sixteenths_now = SIXTEENTHS_NOW;
+		  for(side=0; side<2; side++)
+		  {
+			  if(last_press_sixteenths[side] != 0)
+			  {
+				  //sprintf(debug_buff,"Timeout: now %d: %u, last_press: %u, irq: %d\r\n", side, sixteenths_now, last_press_sixteenths[side], button_irq);
+				  //DEBUG_TX(debug_buff);
+				  if(sixteenths_now - last_press_sixteenths[side] > T_DOUBLE_PRESS_16)
+				  {
+					  On_Button_IRQ(BUTTON_NOT_PRESSED, pressed_button, button_state);
+				  }
+			  }
+		  }
+	  }
+	  if(stop_mode)
+	  {
+		  Radio_Off();
+		  for(side=0; side<2; side++)
+			  last_press_sixteenths[side] = 0;
+		  DEBUG_TX("Stopping\r\n\0");
+		  HAL_UART_MspDeInit(&huart1);
+		  //HAL_PWR_EnterSTANDBYMode();
+		  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+	  }
   }
 
   /* USER CODE END WHILE */
@@ -412,7 +434,7 @@ static void SYSCLKConfig_STOP(void)
   RCC_OscInitStruct.PLL.PLLState        = RCC_PLL_ON;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
-	  DEBUG_TX("Sysclock restart error 1\r\n");
+	  DEBUG_TX("Sysclock restart error 1\r\n\0");
   }
 
   /* Get the Clocks configuration according to the internal RCC registers */
@@ -424,7 +446,7 @@ static void SYSCLKConfig_STOP(void)
   RCC_ClkInitStruct.SYSCLKSource  = RCC_SYSCLKSOURCE_PLLCLK;
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, pFLatency) != HAL_OK)
   {
-	  DEBUG_TX("Sysclock restart error 2\r\n");
+	  DEBUG_TX("Sysclock restart error 2\r\n\0");
   }
 }
 
@@ -465,13 +487,13 @@ static void SystemPower_Config(void)
 }
 
 
-void Set_Display(uint8_t screen_num, uint8_t turn_on_radio)
+void Set_Display(uint8_t screen_num)
 {
 	if (ecog_write_inverse(0))
 	{
 		ecog_cls();
 		Build_Screen(screen_num);
-		ecog_update_display(1, turn_on_radio);
+		ecog_update_display(1);
 		current_screen = screen_num;
 	}
 }
@@ -505,7 +527,7 @@ void Build_Screen(uint8_t screen_num)
 		else if(strncmp(screens[screen_num][region]+pos, "F", 1) == 0)
 		{
 			pos++; f = screens[screen_num][region][pos]; pos++;
-			//sprintf(debug_buff,"Build_Screen, font: %d                             \r\n", f);
+			//sprintf(debug_buff,"Build_Screen, font: %d\r\n", f);
 			//DEBUG_TX(debug_buff);
 			switch(f)
 			{
@@ -526,7 +548,7 @@ void Build_Screen(uint8_t screen_num)
 		else if(strncmp(screens[screen_num][region]+pos, "Y", 1) == 0)
 		{
 			pos++; y = screens[screen_num][region][pos]; pos++;
-			//sprintf(debug_buff,"Build_Screen, y: %d                             \r\n", y);
+			//sprintf(debug_buff,"Build_Screen, y: %d\r\n", y);
 			//DEBUG_TX(debug_buff);
 		}
 		else if(strncmp(screens[screen_num][region]+pos, "B", 1) == 0)
@@ -540,7 +562,7 @@ void Build_Screen(uint8_t screen_num)
 		else if(strncmp(screens[screen_num][region]+pos, "C", 1) == 0)
 		{
 			pos++; len = screens[screen_num][region][pos]; pos++;
-			//sprintf(debug_buff,"Build_Screen, centred text, pos: %d, len: %d   \r\n", pos, len);
+			//sprintf(debug_buff,"Build_Screen, centred text, pos: %d, len: %d\r\n", pos, len);
 			//DEBUG_TX(debug_buff);
 			ecog_printfc(font, y, screens[screen_num][region] + pos);
 			//sprintf(debug_buff,"Build_Screen, text: %20s\r\n", screens[screen_num][region] + pos);
@@ -611,205 +633,247 @@ void Build_Screen(uint8_t screen_num)
 	}
 }
 
-uint8_t On_Button_Press(uint16_t GPIO_Pin, 	GPIO_PinState button_state)
+uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState button_state)
 {
 	int 				side 					= LEFT_SIDE;
 	uint32_t 			pressed_time 			= 0;
 	uint32_t 			now;
-	int 				i;
-	int					en_double				= 0;
 
-	if(current_state != STATE_DEMO)
-		if((states[current_state][S_LD] != 0xFF) | (states[current_state][S_RD] != 0xFF) | (states[current_state][S_MD] != 0xFF))
-		{
-			en_double = 1;
-			DEBUG_TX("Double enabled\r\n");
-		}
 	if (GPIO_Pin == PUSH_RIGHT_Pin)
-	{
 		side = RIGHT_SIDE;
-		//sprintf(debug_buff,"Right button event: %d\r\n", (int)Cbr_Now());
-		//DEBUG_TX(debug_buff);
-	}
 	else if (GPIO_Pin == LEFT_PUSH_Pin)
-	{
 		side = LEFT_SIDE;
-		//sprintf(debug_buff,"Left button event: %d\r\n", (int)Cbr_Now());
-		//DEBUG_TX(debug_buff);
-	}
 	else
-	{
-		//DEBUG_TX("Unknown button event\r\n");
 		return PRESS_NONE;
-	}
 
 	now = Cbr_Now();
-	button_state = HAL_GPIO_ReadPin(GPIOA, GPIO_Pin);
-	if (button_state == GPIO_PIN_RESET)
+	//sprintf(debug_buff,"16th now: %u, last %u, side: %d, state: %d\r\n", SIXTEENTHS_NOW, last_press_sixteenths[side], (int)side, (int)button_state);
+	//DEBUG_TX(debug_buff);
+	//button_state = HAL_GPIO_ReadPin(GPIOA, GPIO_Pin);
+	if(button_pressed && (button_state == GPIO_PIN_RESET))
 	{
-		if(en_double)
-		{
-			if((now - button_press_time[side]) < 2)
-			{
-				if(side == LEFT_SIDE)
-				{
-					//button_press_time[side] = now;  // So that we can catch long presses
-					return PRESS_LEFT_DOUBLE;
-				}
-				else
-				{
-					//button_press_time[side] = now;  // So that we can catch long presses
-					return PRESS_RIGHT_DOUBLE;
-				}
-			}
-			button_press_time[side] = now;
-			return PRESS_NONE;
-		}
+		last_action_reset[side] = 0;  // To prevent false longs
+		if((last_press_sixteenths[side] != 0) && ((SIXTEENTHS_NOW - last_press_sixteenths[side]) < T_DOUBLE_PRESS_16))
+	  	{
+	   		stop_mode = 1;
+	   		//if(side == LEFT_SIDE) DEBUG_TX("AL\r\n\0"); else DEBUG_TX("AR\r\n\0");
+	   		if(side == LEFT_SIDE)
+	   			return PRESS_LEFT_DOUBLE;
+	   		else
+	   			return PRESS_RIGHT_DOUBLE;
+	   	}
+	   	else
+	   	{
+	   		last_press_sixteenths[side] = SIXTEENTHS_NOW;
+	   		if(current_state != STATE_DEMO)
+	   			Radio_On(0);  // Radio needs about 400 ms to turn on, so start now.
+	   		else
+	   			Radio_Off();
+	   		stop_mode = 0;
+	   		//if(side == LEFT_SIDE) DEBUG_TX("BL\r\n\0"); else DEBUG_TX("BR\r\n\0");
+	   		return PRESS_NONE;
+	   	}
+	}
+	else if(!button_pressed)
+	{
+  		button_press_time[side] = now;  // Put these here to prevent false longs if set is missed
+   		last_action_reset[side] = 1;    // Put these here to prevent false longs if set is missed
+		last_press_sixteenths[side] = SIXTEENTHS_NOW;
+		stop_mode = 1;
+   		//if(side == LEFT_SIDE) DEBUG_TX("CL\r\n\0"); else DEBUG_TX("CR\r\n\0");
+		if(side == LEFT_SIDE)
+			return PRESS_LEFT_SINGLE;
 		else
-		{
-			button_press_time[side] = now;
-			if(side == LEFT_SIDE)
-				return PRESS_LEFT_SINGLE;
-			else
-				return PRESS_RIGHT_SINGLE;
-		}
+			return PRESS_RIGHT_SINGLE;
 	}
 	else if(button_state == GPIO_PIN_SET)
 	{
-		pressed_time = now - button_press_time[side];
-		if((pressed_time > T_RESET_PRESS) & (pressed_time < T_MAX_RESET_PRESS))
+		if(last_action_reset[side])
 		{
-			DEBUG_TX("System reset\r\n");
-			NVIC_SystemReset();
-		}
-		else if(pressed_time > T_LONG_PRESS)
-		{
-			if(side == LEFT_SIDE)
-				return PRESS_LEFT_LONG;
+			last_action_reset[0] = 0; last_action_reset[1] = 0;
+			pressed_time = now - button_press_time[side];
+			//sprintf(debug_buff,"pressed_time: %d\r\n", (int)pressed_time);
+			//DEBUG_TX(debug_buff);
+			if((pressed_time > T_RESET_PRESS) && (pressed_time < T_MAX_RESET_PRESS) && (button_pressed))
+			{
+				DEBUG_TX("System reset\r\n\0");
+				NVIC_SystemReset();
+			}
+
+			else if((pressed_time > T_LONG_PRESS) && (pressed_time < T_MAX_RESET_PRESS))
+			{
+				stop_mode = 1;
+		   		//if(side == LEFT_SIDE) DEBUG_TX("DL\r\n\0"); else DEBUG_TX("DR\r\n\0");
+				if(side == LEFT_SIDE)
+					return PRESS_LEFT_LONG;
+				else
+					return PRESS_RIGHT_LONG;
+			}
 			else
-				return PRESS_RIGHT_LONG;
+			{
+		   		//if(side == LEFT_SIDE) DEBUG_TX("EL\r\n\0"); else DEBUG_TX("ER\r\n\0");
+				return PRESS_NONE;
+			}
+		}
+		else
+		{
+	   		//if(side == LEFT_SIDE) DEBUG_TX("FL\r\n\0"); else DEBUG_TX("FR\r\n\0");
+			return PRESS_NONE;
 		}
 	}
-	return PRESS_NONE; // Should not ever get here, but just in case
+	// Should not ever get here, but just in case
+	stop_mode = 1;
+	//DEBUG_TX("G\r\n\0");
+	return PRESS_NONE;
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	pressed_button = GPIO_Pin;
-	button_state = __HAL_GPIO_EXTI_GET_IT(GPIO_Pin);
+	button_state = HAL_GPIO_ReadPin(GPIOA, GPIO_Pin);
+	//button_state = __HAL_GPIO_EXTI_GET_IT(GPIO_Pin);
 	button_irq = 1;
 	return;
 }
 
-void On_Button_IRQ(uint16_t GPIO_Pin, GPIO_PinState button_state)
+void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState button_state)
 {
 	uint8_t button_press;
+	uint8_t old_state;
+	uint8_t changed = 0;
+	static uint8_t wait_demo;
 
-	if(GPIO_Pin == ROLLING_DEMO_PIN)
-		button_press = PRESS_DEMO;
-	else
-	{
-		button_press = On_Button_Press(GPIO_Pin, button_state);
-		//sprintf(debug_buff, "button_press: %d\r\n", button_press);
-		//DEBUG_TX(debug_buff);
-	}
+	button_press = On_Button_Press(button_pressed, GPIO_Pin, button_state);
+	sprintf(debug_buff, "Press: %d\r\n", button_press);
+	DEBUG_TX(debug_buff);
 
 	if(button_press == PRESS_NONE)
 	{
 		return;
 	}
-	else if(current_state == STATE_INITIAL)
+	if(current_state == STATE_INITIAL)
 	{
-		DEBUG_TX("node_state is initial\r\n");
-		if ((button_press == PRESS_RIGHT_LONG) | (button_press == PRESS_LEFT_LONG))
+		DEBUG_TX("node_state is initial\r\n\0");
+		if((button_press == PRESS_RIGHT_LONG) || (button_press == PRESS_LEFT_LONG))
 		{
+			wait_demo = 0;
 			Network_Include();
+		}
+		else if(button_press == PRESS_LEFT_DOUBLE)
+		{
+			wait_demo = 1;
+			return;
+		}
+		else if((button_press == PRESS_RIGHT_DOUBLE))
+		{
+			if(wait_demo)
+			{
+				DEBUG_TX("Starting demo mode\r\n\0");
+				Radio_Off();
+				Load_Demo_Screens();
+				screen_num = 0;
+				Set_Display(0);
+				current_state = STATE_DEMO;
+				return;
+			}
 		}
 		else
 		{
-			DEBUG_TX("Starting demo mode\r\n");
-			Radio_Off();
-			Load_Demo_Screens();
-			screen_num = 0;
-			button_irq = 0;
-			Set_Display(0, 0);
-			current_state = STATE_DEMO;
+			wait_demo = 0;
 			return;
 		}
 	}
 	else if(current_state == STATE_DEMO)
 	{
-		DEBUG_TX("Node state demo\r\n");
-		if ((button_press == PRESS_RIGHT_LONG) || (button_press == PRESS_LEFT_LONG)
-			|| (button_press == PRESS_RIGHT_DOUBLE) || (button_press == PRESS_LEFT_DOUBLE))
+		DEBUG_TX("Node state demo\r\n\0");
+		if ((button_press == PRESS_RIGHT_LONG) || (button_press == PRESS_LEFT_LONG))
 			screen_num = 0;
 		else
 			screen_num++;
 		if (screen_num == MAX_SCREEN)
 			screen_num = 0;
-		button_irq = 0;
-		Set_Display(screen_num, 0);
-		if ((screen_num == 9) || (screen_num == 16) || (screen_num == 23))
-		{
-			Delay_ms(2500);
-			screen_num++;
-			Set_Display(screen_num, 0);
-		}
-		if(MODE == ROLLING_DEMO)
-			RTC_Delay(5);
+		stop_mode = 1;
+		Set_Display(screen_num);
 	}
 	else
 	{
+		old_state = current_state;
 		switch(button_press)
 		{
 			case PRESS_LEFT_SINGLE:
 				if(states[current_state][S_LS] != 0xFF)
+				{
+					changed = 1;
 					current_state = states[current_state][S_LS];
+				}
 				break;
 			case PRESS_LEFT_DOUBLE:
 				if(states[current_state][S_LD] != 0xFF)
+				{
+					changed = 1;
 					current_state = states[current_state][S_LD];
+				}
 				break;
 			case PRESS_RIGHT_SINGLE:
 				if(states[current_state][S_RS] != 0xFF)
+				{
+					changed = 1;
 					current_state = states[current_state][S_RS];
+				}
 				break;
 			case PRESS_RIGHT_DOUBLE:
 				if(states[current_state][S_RD] != 0xFF)
+				{
+					changed = 1;
 					current_state = states[current_state][S_RD];
+				}
 				break;
 			default:
-				DEBUG_TX("Warning. Undefined button_press\r\n");
+				DEBUG_TX("Warning. Undefined button_press\r\n\0");
 				current_state = states[current_state][0];
 		}
-		On_NewState();
+		if(current_state != old_state)
+			On_NewState();
+		else
+			ecog_discharge_capacitors();
+		if(!changed)
+		{
+			stop_mode = 1;
+		    DEBUG_TX("Press not used in this state\r\n\0");
+		}
 	}
 }
 
 void On_NewState(void)
 {
 	uint8_t alert_id[] = {0x00, 0x00};
-	sprintf(debug_buff, "On_NewState, state: %d       \r\n", current_state);
+	sprintf(debug_buff, "On_NewState, state: %d\r\n", current_state);
 	DEBUG_TX(debug_buff);
 	if(states[current_state][S_A] != 0xFF)
 	{
-		Radio_On();
-		button_irq = 0;  // So other functions can check if it's been pressed again
+		Host_Ready();
 		alert_id[1] = states[current_state][S_A]; alert_id[0] = 0x00;
-		sprintf(debug_buff, "Sending alert: %x %x       \r\n", alert_id[0], alert_id[1]);
+		sprintf(debug_buff, "Sending alert: %x %x\r\n", alert_id[0], alert_id[1]);
 		DEBUG_TX(debug_buff);
 		Send_Message(f_alert, 2, alert_id, 1, 0);
 	}
 	else  // If a message is sent, display is changed as part of Manage_Send(), otherwise change here
 	{
 		if(states[current_state][S_D] != 0xFF)
-			Set_Display(states[current_state][S_D], 0);
+			Set_Display(states[current_state][S_D]);
+	}
+	if(states[current_state][S_W] != 0xFF)  // Wait in this state for a fixed time
+	{
+		DEBUG_TX("On_NewState delay");
+		RTC_Delay(states[current_state][S_W]);
+		current_state = states[current_state][S_WS];
+		On_NewState();
 	}
 }
 
 void Power_Down(void)
 {
-	DEBUG_TX("Powering down\r\n");
+	DEBUG_TX("Powering down\r\n\0");
 	Delay_ms(100);
 	/*
 	__HAL_RCC_GPIOA_CLK_DISABLE();
@@ -821,25 +885,26 @@ void Power_Down(void)
 	HAL_UART_MspDeInit(&huart1);
 	//HAL_SuspendTick();
 	HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
-	DEBUG_TX("Powered down\r\n");
+	DEBUG_TX("Powered down\r\n\0");
 }
 
 void Network_Include(void)
 {
 	uint8_t equal = 1;
 	int i;
-	DEBUG_TX("Network_Include\r\n");
+	DEBUG_TX("Network_Include\r\n\0");
 	if(include_state == 0)
 	{
-		Set_Display(STATE_CONNECTING, 1);
+		Set_Display(STATE_CONNECTING);
 		include_state = 1;
 	}
 	else if(include_state == 1)
 	{
-		Set_Display(STATE_PROBLEM, 1);
 		include_state = 2;
 	}
-	Radio_On();
+	else if(include_state == 2)
+		include_state = 3;
+	Radio_On(1);
 	if(Message_Search(beacon_address, Rx_Buffer, BEACON_SEARCH_TIME) == SEARCH_OK)
 	{
 		bridge_address[0] = Rx_Buffer[2]; bridge_address[1] = Rx_Buffer[3];
@@ -851,22 +916,26 @@ void Network_Include(void)
 		{
 			case 1:
 				Radio_Off();
-				//RTC_Delay(10*60);
-				RTC_Delay(30);
+				RTC_Delay(20);
 				break;
 			case 2:
 				Radio_Off();
-				RTC_Delay(60*60);
+				RTC_Delay(60);
+				break;
+			case 3:
+				Radio_Off();
+				Set_Display(STATE_PROBLEM);
+				RTC_Delay(600);
 				break;
 			default:
 				Radio_Off();
-				RTC_Delay(60*60);
+				RTC_Delay(3600);
 		}
 		return;
 	}
 	if(Message_Search(grant_address, Rx_Buffer, BEACON_SEARCH_TIME) == SEARCH_OK)
 	{
-		DEBUG_TX("Received grant\r\n");
+		DEBUG_TX("Received grant\r\n\0");
 		equal = 1;
 		for(i=0; i<4; i++)
 			if(Rx_Buffer[i+12] != node_id[i])
@@ -879,17 +948,17 @@ void Network_Include(void)
 			node_address[0] = Rx_Buffer[16]; node_address[1] = Rx_Buffer[17];
 			uint8_t data[] = {0x00, 0x00};
 			Send_Message(f_ack, 0, data, 0, 0);
-			DEBUG_TX("Sent ack for grant\r\n");
+			DEBUG_TX("Sent ack for grant\r\n\0");
 			include_state = 0;
 			current_state = STATE_CONFIG;
 			On_NewState();
-			DEBUG_TX("Sending woken_up after grant\r\n");
+			DEBUG_TX("Sending woken_up after grant\r\n\0");
 			Send_Message(f_woken_up, 0, data, 1, 0);
 		}
 	}
 	else
 	{
-		DEBUG_TX("Network_Include. Did not receive grant\r\n");
+		DEBUG_TX("Network_Include. Did not receive grant\r\n\0");
 		RTC_Delay(30);
 	}
 }
@@ -898,7 +967,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if (huart->Instance == USART3)
 	{
-		DEBUG_TX("HAL_UART_TxCpltCallback\r\n");
+		DEBUG_TX("HAL_UART_TxCpltCallback\r\n\0");
 		radio_ready = SET;
 	}
 }
@@ -907,7 +976,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if (huart->Instance == USART3)
 	{
-		DEBUG_TX("HAL_UART_RxCpltCallback\r\n");
+		DEBUG_TX("HAL_UART_RxCpltCallback\r\n\0");
 		radio_ready = SET;
 	}
 }
@@ -917,7 +986,7 @@ void Radio_Tx_IT(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size
 	radio_ready = RESET;
 	if(HAL_UART_Transmit_IT(uart, (uint8_t *)buffer, buffer_size) != HAL_OK)
 	{
-		DEBUG_TX("Radio Tx Error\r\n");
+		DEBUG_TX("Radio Tx Error\r\n\0");
 	}
 	while (radio_ready != SET)
 	{
@@ -929,7 +998,7 @@ void Radio_Tx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size)
 	radio_ready = RESET;
 	if(HAL_UART_Transmit(uart, (uint8_t *)buffer, buffer_size, 1000) != HAL_OK)
 	{
-		DEBUG_TX("Radio Tx Error\r\n");
+		DEBUG_TX("Radio Tx Error\r\n\0");
 	}
 }
 
@@ -938,10 +1007,10 @@ void Radio_Rx_IT(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size
 	radio_ready = RESET;
 	if(HAL_UART_Receive_IT(uart, (uint8_t *)buffer, buffer_size) != HAL_OK)
 	{
-		DEBUG_TX("UART Rx Error\r\n");
+		DEBUG_TX("UART Rx Error\r\n\0");
 	}
 	else
-		DEBUG_TX("Radio_Rx_IT OK\r\n");
+		DEBUG_TX("Radio_Rx_IT OK\r\n\0");
 }
 
 uint16_t Radio_Rx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size, uint16_t timeout)
@@ -950,23 +1019,31 @@ uint16_t Radio_Rx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_siz
 	return status;
 }
 
-void Radio_On(void)
+void Radio_On(int delay)
 {
-	DEBUG_TX("Radio_On\r\n");
+	DEBUG_TX("Radio_On\r\n\0");
     HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_SET);
     HAL_UART_MspInit(&huart3);
-    Delay_ms(400);
-    HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_RESET);
+    if(delay)
+    {
+    	Delay_ms(400);
+    	Host_Ready();
+    	Delay_ms(50);
+    }
+}
+
+void Host_Ready(void)
+{
+	HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_RESET);
 }
 
 void Radio_Off(void)
 {
 	GPIO_InitTypeDef GPIO_InitStruct;
-	DEBUG_TX("Radio_Off\r\n");
+	DEBUG_TX("Radio_Off\r\n\0");
 	HAL_UART_MspDeInit(&huart3);
     HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_RESET);
-    Delay_ms(5);
 	__GPIOB_CLK_ENABLE();
 	GPIO_InitStruct.Pin = GPIO_PIN_10;
 	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
@@ -986,7 +1063,7 @@ void Radio_Off(void)
 void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t ack, uint8_t beacon)
 {
 	int i;
-	DEBUG_TX("Send_Message\r\n");
+	//DEBUG_TX("Send_Message\r\n\0");
 	tx_message[0] = bridge_address[0]; tx_message[1] = bridge_address[1];
 	tx_message[2] = node_address[0]; tx_message[3] = node_address[1];
 	tx_message[4] = function;
@@ -998,8 +1075,6 @@ void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t 
 			tx_message[i+10] = data[i];
 	}
 	tx_length = 10 + data_length;
-	sprintf(debug_buff, "Send_Message: %02x %02x %02x %02x %02x %02x, data length: %d\r\n", tx_message[0], tx_message[1], tx_message[2], tx_message[3], tx_message[4], tx_message[5], data_length);
-	DEBUG_TX(debug_buff);
 	send_attempt = 0;
 	Manage_Send(ack, beacon, function);
 }
@@ -1007,10 +1082,11 @@ void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t 
 void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 {
 	static uint8_t local_function;
-	sprintf(debug_buff, "Manage_Send, send_attempt: %d                          \r\n", send_attempt);
+	uint8_t found = 0;
+	sprintf(debug_buff, "Send attempt: %d\r\n", send_attempt);
 	DEBUG_TX(debug_buff);
 	if(send_attempt == 4)
-		Radio_On();
+		Radio_On(1);
 	send_attempt++;
 	if(function != f_unknown)
 		local_function = function;
@@ -1021,59 +1097,70 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 	{
 		if(Message_Search(beacon_address, Rx_Buffer, BEACON_SEARCH_TIME) == SEARCH_OK)
 		{
-			DEBUG_TX("Manage_Send found beacon\r\n");
+			DEBUG_TX("Manage_Send found beacon\r\n\0");
 			Send_Delay();
 		}
 		else
 		{
-			DEBUG_TX("Manage_Send did not find beacon\r\n");
-			// *** Left in high power state but changed to add RTC_Delay
+			DEBUG_TX("Manage_Send did not find beacon\r\n\0");
 			RTC_Delay(10);
 			return;
 		}
 	}
 	RADIO_TXS(tx_message, tx_length);
-	DEBUG_TX("Manage_Send sent message\r\n");
 	if(ack)
 	{
-		DEBUG_TX("Manage_Send waiting for ack\r\n");
-		if(Message_Search(node_address, Rx_Buffer, ACK_SEARCH_TIME) == SEARCH_OK)
+		if (Message_Search(node_address, Rx_Buffer, ACK_SEARCH_TIME) == SEARCH_OK)
+			found = 1;
+		if(found)
 		{
 			if(Rx_Buffer[4] == f_ack)
 			{
 				send_attempt = 0;
-				DEBUG_TX("Manage_Send ack received\r\n");
-				if((states[current_state][S_D] != 0xFF) & (local_function != f_woken_up))
+				DEBUG_TX("Ack received\r\n\0");
+				//sprintf(debug_buff, "S_D: %x, local_function: %x, state: %x, include: %x\r\n\0", (int)states[current_state][S_D],
+				//		(int)local_function, (int)current_state, (int)include_state);
+				//DEBUG_TX(debug_buff);
+				uint32_t wakeup = ((Rx_Buffer[10] << 8) | Rx_Buffer[11]) << 1;
+				if(wakeup != 0)
+					Radio_Off();  // Turn radio off ASAP, before updating display
+				if((current_state == STATE_PROBLEM) && (include_state == 0))  // Comms had failed by came back after a wake up
 				{
-					uint32_t wakeup = ((Rx_Buffer[10] << 8) | Rx_Buffer[11]) << 1;
-					if(wakeup != 0)
-						Radio_Off();  // Turn radio off ASAP, before updating display
-					Set_Display(states[current_state][S_D], 0);
+					DEBUG_TX("Back from the dead\r\n\0");
+					current_state = STATE_NORMAL;
+					Set_Display(states[current_state][S_D]);
+				}
+				else if((states[current_state][S_D] != 0xFF) && (local_function != f_woken_up))
+				{
+					Set_Display(states[current_state][S_D]);
 				}
 				Set_Wakeup(0);
 			}
 			else
 			{
-				// If we get a message that is not an ack when expecting an ack, clear it by sending ack back.
-				DEBUG_TX("Manage_Send another message received when expecting ack\r\n");
-				uint8_t data[] = {0x00, 0x00};
-				Send_Message(f_ack, 0, data, 0, 0);
-				Set_Wakeup(1);
+				DEBUG_TX("Another message received when expecting ack\r\n\0");
+				found = 0;
 			}
 		}
-		else
+		if(!found)
 		{
-			DEBUG_TX("Manage_Send no ack 1\r\n");
+			DEBUG_TX("Manage_Send no ack 1\r\n\0");
 			switch(send_attempt)
 			{
 				case 1:
 					if (function != f_woken_up)
-						Set_Display(STATE_SENDING, 1);
+						Set_Display(STATE_SENDING);
 				case 2:
 				case 3:
-				case 5:
 					Send_Delay();
+				case 5:
+				case 9:
+					Radio_Off();
+					Delay_ms(200);
+					Radio_On(1);
 				case 6:
+				case 8:
+				case 10:
 					Manage_Send(1, beacon, local_function);
 					break;
 				case 4:
@@ -1081,10 +1168,16 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 					RTC_Delay(30);
 					break;
 				case 7:
-					DEBUG_TX("Manage_Send permanent failure\r\n");
-					Set_Display(STATE_PROBLEM, 0);
+					DEBUG_TX("Manage_Send failure. Waiting 10 mins\r\n\0");
+					current_state = STATE_PROBLEM;
 					Radio_Off();
+					On_NewState();
 					RTC_Delay(600);
+					break;
+				case 11:
+					send_attempt = 0;
+					Network_Include();
+					break;
 			}
 		}
 	}
@@ -1094,17 +1187,19 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 	}
 }
 
-void Listen_Radio(void)
+void Listen_Radio(uint8_t reset_fail_count)
 {
 	static uint8_t fail_count = 0;
-	DEBUG_TX("Listen_Radio\r\n");
+	if(reset_fail_count)
+		fail_count = 0;
+	sprintf(debug_buff, "Listen radio, fail: %d\r\n\0", (int)fail_count);
+	DEBUG_TX(debug_buff);
 	if(Message_Search(node_address, Rx_Buffer, ACK_SEARCH_TIME) == SEARCH_OK)
 	{
-		fail_count = 0;
 		uint8_t data[] = {0x00, 0x00};
 		if(Rx_Buffer[4] == f_config)
 		{
-			DEBUG_TX("Listen_Radio. Config message received\r\n");
+			DEBUG_TX("Listen_Radio. Config message received\r\n\0");
 			if(MODE != RATE)
 				Store_Config();
 			Send_Message(f_ack, 0, data, 0, 0);
@@ -1112,38 +1207,44 @@ void Listen_Radio(void)
 		}
 		else if(Rx_Buffer[4] == f_start)
 		{
-			DEBUG_TX("Listen_Radio. Start received\r\n");
-			current_state = 0;
-			On_NewState();
+			DEBUG_TX("Listen_Radio. Start received\r\n\0");
+			if(start_from_reset)
+			{
+				start_from_reset = 0;
+				current_state = STATE_START;
+			}
+			else
+				current_state = STATE_NORMAL;
 			Send_Message(f_ack, 0, data, 0, 0);
+			On_NewState();
 			Set_Wakeup(0);
 		}
 		else if(Rx_Buffer[4] == f_send_battery)
 		{
-			DEBUG_TX("Listen_Radio. Send battery received\r\n");
+			DEBUG_TX("Listen_Radio. Send battery received\r\n\0");
 			Send_Message(f_ack, 0, data, 0, 0);
-			Send_Battery();
+			Read_Battery(1);
 			Set_Wakeup(0);
 		}
 		else if(Rx_Buffer[4] == f_ack)
 		{
-			DEBUG_TX("Listen_Radio. Ack received\r\n");
+			DEBUG_TX("Listen_Radio. Ack received\r\n\0");
 			Set_Wakeup(0);
 		}
 		else
 		{
-			DEBUG_TX("Listen_Radio. Unknown message, sending ack\r\n");
+			DEBUG_TX("Listen_Radio. Unknown message, sending ack\r\n\0");
 			Send_Message(f_ack, 0, data, 0, 0);
 			Set_Wakeup(1);
 		}
 	}
 	else
 	{
-		DEBUG_TX("Listen_Radio. Search failed\r\n");
+		DEBUG_TX("Listen_Radio. Search failed\r\n\0");
 		if(fail_count < 4)
 		{
 			fail_count++;
-			Set_Wakeup(0);
+			Listen_Radio(0);
 		}
 		else  // Catches case where we miss an ack and last wakeup was 0
 		{
@@ -1156,10 +1257,10 @@ void Listen_Radio(void)
 
 void Set_Wakeup(uint8_t error)
 {
-	DEBUG_TX("Set_Wakeup\r\n");
+	DEBUG_TX("Set_Wakeup\r\n\0");
 	if(error)
 	{
-		DEBUG_TX("Set_Wakeup, error\r\n");
+		DEBUG_TX("Set_Wakeup, error\r\n\0");
 		Radio_Off();    // Just in case
 		RTC_Delay(30);  // On error wake up in 30 secs, when woken_up will be sent, resetting communications
 	}
@@ -1170,14 +1271,13 @@ void Set_Wakeup(uint8_t error)
 			wakeup = ONE_DAY;
 		if(wakeup == 0)
 		{
-			DEBUG_TX("Set_Wakeup, calling Listen_Radio\r\n");
-			Listen_Radio();
+			DEBUG_TX("Set_Wakeup, calling Listen_Radio\r\n\0");
+			Listen_Radio(1);
 		}
 		else
 		{
 			sprintf(debug_buff, "Set_Wakeup for %d\r\n", (int)wakeup);
 			DEBUG_TX(debug_buff);
-			Radio_Off();
 			RTC_Delay(wakeup);
 		}
 	}
@@ -1187,7 +1287,7 @@ void Store_Config(void)
 {
 	uint8_t s, r, i = 0;
 	uint8_t pos = 12;
-	DEBUG_TX("Store_Config\r\n");
+	DEBUG_TX("Store_Config\r\n\0");
 	if(strncmp(Rx_Buffer+pos, "S", 1) == 0)
 	{
 		s = Rx_Buffer[pos+1];
@@ -1203,7 +1303,6 @@ void Store_Config(void)
 			//sprintf(debug_buff, "%c", screens[s][r][i]);
 			//DEBUG_TX(debug_buff);
 		}
-		DEBUG_TX("\r\n");
 		//sprintf(debug_buff, "Store_Config, screen: %d, reg: %d, %02x %02x %02x %02x %02x %02x\r\n", s, r, screens[s][r][0], screens[s][r][1], screens[s][r][2], screens[s][r][3], screens[s][r][4], screens[s][r][5]);
 		//DEBUG_TX(debug_buff);
 		config_stored++;
@@ -1211,8 +1310,8 @@ void Store_Config(void)
 		//DEBUG_TX(debug_buff);
 		if(s == current_screen)
 		{
-			DEBUG_TX("Store_Config. Current screen updated\r\n");
-			Set_Display(current_screen, 0);
+			DEBUG_TX("Store_Config. Current screen updated\r\n\0");
+			Set_Display(current_screen);
 		}
 	}
 	else if(strncmp(Rx_Buffer+pos, "C", 1) == 0)
@@ -1228,7 +1327,6 @@ void Store_Config(void)
 	}
 	else if(strncmp(Rx_Buffer+pos, "M", 1) == 0)
 	{
-		DEBUG_TX("State config\r\n");
 		for(i=0; i<64; i++)
 			debug_buff[i] = 0x20;
 		s = Rx_Buffer[pos+1];
@@ -1247,7 +1345,7 @@ void Store_Config(void)
 	}
 }
 
-void Send_Battery()
+void Read_Battery(uint8_t send)
 {
 	uint32_t adc_value = 0x55;
 	uint8_t alert[] = {0x02, 0x00};
@@ -1256,14 +1354,14 @@ void Send_Battery()
 	Delay_ms(100);
 	if(HAL_ADC_Start(&hadc) != HAL_OK)
 	{
-		DEBUG_TX("ADC start error\r\n");
+		DEBUG_TX("ADC start error\r\n\0");
 		HAL_ADC_DeInit(&hadc);
 		HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
 		return;
 	}
 	if(HAL_ADC_PollForConversion(&hadc, 50) != HAL_OK)
 	{
-		DEBUG_TX("ADC conversion error\r\n");
+		DEBUG_TX("ADC conversion error\r\n\0");
 		HAL_ADC_Stop(&hadc);
 		HAL_ADC_DeInit(&hadc);
 		HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
@@ -1276,12 +1374,14 @@ void Send_Battery()
 		HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
 		sprintf(debug_buff, "ADC battery value: %x\r\n", (int)adc_value);
 		DEBUG_TX(debug_buff);
-		alert[1] = adc_value >> 8;
-		sprintf(debug_buff, "Sending alert: %x %x       \r\n", alert[0], alert[1]);
-		DEBUG_TX(debug_buff);
-		Send_Message(f_alert, 2, alert, 1, 0);
+		if(send)
+		{
+			alert[1] = adc_value >> 8;
+			sprintf(debug_buff, "Sending alert: %x %x\r\n", alert[0], alert[1]);
+			DEBUG_TX(debug_buff);
+			Send_Message(f_alert, 2, alert, 1, 0);
+		}
 	}
-
 	return;
 }
 
@@ -1289,15 +1389,15 @@ void Send_Battery()
 uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, uint16_t max_search_time)
 {
 	int search_start = Cbr_Now();
-	sprintf(debug_buff, "Message_Search, address: %02x %02x\r\n", address[0], address[1]);
-	DEBUG_TX(debug_buff);
+	//sprintf(debug_buff, "Message_Search, address: %02x %02x\r\n", address[0], address[1]);
+	//DEBUG_TX(debug_buff);
 	while (1)
 	{
 		__HAL_UART_FLUSH_DRREGISTER(&huart3);
 		if(current_state != STATE_INITIAL) // So we can display "sending" message if there is no immediate ack
 			status = Rx_Message(Rx_Buffer, &length, 1500);
 		else
-			status = Rx_Message(Rx_Buffer, &length, 6000);
+			status = Rx_Message(Rx_Buffer, &length, 8000);
 		if (status == HAL_OK)
 		{
 			//sprintf(debug_buff, "MS Rx: %02x %02x %02x %02x %02x %02x %02x %02x, Length: %d\r\n", Rx_Buffer[0], Rx_Buffer[1],
@@ -1309,17 +1409,16 @@ uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, uint16_t max_search
 			}
 			if ((Cbr_Now() - search_start) > max_search_time)
 			{
-				DEBUG_TX("Message_Search timeout\r\n");
+				DEBUG_TX("Message_Search timeout\r\n\0");
 				return SEARCH_TIMEOUT;
 			}
 		}
 		else
 		{
 			__HAL_UART_FLUSH_DRREGISTER(&huart3);
-			DEBUG_TX("Message_Search status != HAL_OK\r\n");
 			if ((Cbr_Now() - search_start) > max_search_time)
 			{
-				DEBUG_TX("Message_Search 2nd timeout error\r\n");
+				DEBUG_TX("Message_Search 2nd timeout error\r\n\0");
 				return SEARCH_ERROR;
 			}
 		}
@@ -1359,7 +1458,7 @@ HAL_StatusTypeDef Rx_Message(uint8_t *buffer, int *length, uint16_t timeout)
 			}
 			else
 			{
-				DEBUG_TX("Radio_Rx error 2");
+				DEBUG_TX("Radio_Rx error 2\r\n\0");
 				return status;
 			}
 		}
@@ -1401,127 +1500,25 @@ void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
 
 void On_RTC_IRQ(void)
 {
-	DEBUG_TX("\rRTC IRQ\r\n");
 	if(include_state != 0)
 	{
 		Network_Include();
 	}
-	else if(send_attempt == 4)
+	else if(send_attempt == 4 || send_attempt == 7)
 		Manage_Send(1, 0, f_unknown);
+	else if(states[current_state][S_W] != 0xFF)  // We were waiting in a state for a fixed time
+	{
+		DEBUG_TX("Woken up after delay\r\n\0");
+		current_state = states[current_state][S_WS];
+		On_NewState();
+	}
 	else
 	{
-		DEBUG_TX("Woken up\r\n");
-		Radio_On();
+		DEBUG_TX("Woken up\r\n\0");
+		Radio_On(1);
 		uint8_t data[] = {0x00, 0x00};
 		Send_Message(f_woken_up, 0, data, 1, 0);
 	}
-}
-
-void Load_Normal_Screens(void)
-{
-	// Not very elegant, but it does the job and it shouldn't need to change:
-	int i, s;
-	strcpy(screens[18][0], "F\x03" "Y\x10" "C\x07" "Sending\xFF" "Y\x32" "C\x0F" "Please wait ...\xFF" "ES");
-	strcpy(screens[19][0], "F\x02" "Y\x04" "C\x0F" "Welcome to Spur\xFF" "Y\x1A" "C\x0F" "Push here for 3\xFF"
-			              "Y\x30" "C\x12" "seconds to connect\xFF" "Y\x46" "C\x0A" "to network\xFF" "ES");
-	strcpy(screens[20][0], "F\x03" "Y\x05" "C\x0A" "Connecting\xFF" "Y\x20" "C\x0A" "to network\xFF" "Y\x3D"
-						   "C\x0B" "Please wait\xFF" "ES");
-	strcpy(screens[21][0], "F\x02" "Y\x05" "C\x09" "Connected\xFF" "Y\x20" "C\x0B" "Configuring\xFF" "Y\x3D"
-			              	 "C\x0B" "Please wait\xFF" "ES");
-	strcpy(screens[22][0], "F\x02" "Y\x10" "C\x0B" "Spur button\xFF" "Y\x32" "C\x0E" "name not known\xFF" "ES");
-	strcpy(screens[23][0], "F\x03" "Y\x05" "C\x0D" "Communication\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
-		              	  "C\x0A" "Not in use\xFF" "ES");
-	for(s=18; s<24; s++)
-		for(i=0; i<128; i++)
-			if(screens[s][0][i] == 0xFF)
-				screens[s][0][i] = 0x00;
-}
-
-void Load_Demo_Screens(void)
-{
-	int i, s;
-	strcpy(screens[0][0], "F\x03" "Y\x05" "C\x0B" "This is the\xFF" "Y\x20" "C\x09" "Spur demo\xFF"
-	                	   "Y\x3D" "C\x1D" "push to begin\xFF" "ES");
-	strcpy(screens[1][0], "F\x03" "Y\x10" "C\x0C" "Push here to\xFF" "Y\x32" "C\x0E" "report a fault\xFF" "ES");
-	strcpy(screens[2][0], "F\x03" "Y\x05" "C\x0F" "Fault with this\xFF" "Y\x20" "C\x0D" "appliance has\xFF"
-	                      "Y\x3D" "C\x0D" "been reported\xFF" "ES");
-	strcpy(screens[3][0], "F\x03" "Y\x05" "C\x09" "Push here\xFF" "Y\x20" "C\x09" "for table\xFF" "Y\x3D" "C\x07" "service\xFF" "ES");
-	strcpy(screens[4][0], "F\x03" "Y\x05" "C\x08" "A waiter\xFF" "Y\x20" "C\x0C" "will be with\xFF" "Y\x3D" "C\x08" "you soon\xFF" "ES");
-	strcpy(screens[5][0], "F\x02" "X\x18" "Y\x0E" "T\x04" "Push\xFF" "X\x08" "Y\x24" "T\x08" "here for\xFF"
-	                      "X\x20" "Y\x3C" "T\x04" "bill\xFF" "F\x02" "X\x7D" "Y\x0E" "T\x04" "Push\xFF" "X\x6D" "Y\x24"
-	                      "T\x08" "here for\xFF" "X\x70" "Y\x3C" "T\x07" "service\xFF"
-			              "X\x02" "Y\x02" "B\x5A\x5C" "X\x03" "Y\x03" "B\x58\x5A"
-	          	  	  	  "X\x68" "Y\x02" "B\x5A\x5C" "X\x69" "Y\x03" "B\x58\x5A"
-			              "ES");
-	strcpy(screens[6][0], "F\x02" "Y\2" "C\x0D" "Do you have a\xFF" "Y\x16" "C\x0D" "loyalty card?\xFF"
-	 		               "F\x03" "X\x1C" "Y\x39" "T\x02" "No\xFF"
-	                       "F\x03" "X\x7A" "Y\x39" "T\x03" "Yes\xFF"
-	 		               "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
-	 		               "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
-	strcpy(screens[7][0], "F\x03" "Y\x05" "C\x08" "A waiter\xFF" "Y\x20" "C\x0C" "will be with\xFF" "Y\x3D" "C\x08" "you soon\xFF" "ES");
-	strcpy(screens[8][0], "F\x02" "Y\2" "C\x0B" "How was our\xFF" "Y\x16" "C\x0E" "service today?\xFF"
-			              "X\x08" "Y\x31" "T\x08" "Push for\xFF"
-			  	  	  	  "X\x1A" "Y\x47" "T\x03" "bad\xFF" "X\x6D" "Y\x31" "T\x08" "Push for\xFF" "X\x7E"
-			              "Y\x47" "T\x04" "good\xFF" "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
-			              "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
-	strcpy(screens[9][0], "F\x03" "Y\x10" "C\x0D" "Thank you for\xFF" "Y\x32" "C\x0D" "your feedback\xFF" "ES");
-	strcpy(screens[10][0], "F\x02" "Y\2" "C\x0B" "How was our\xFF" "Y\x16" "C\x0E" "service today?\xFF"
-			               "X\x08" "Y\x31" "T\x08" "Push for\xFF"
-			  	  	   	   "X\x1A" "Y\x47" "T\x03" "bad\xFF" "X\x6D" "Y\x31" "T\x08" "Push for\xFF" "X\x7E"
-			               "Y\x47" "T\x04" "good\xFF" "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
-			               "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
-	strcpy(screens[11][0], "F\x02" "Y\x05" "C\x13" "Push here to report\xFF" "Y\x20" "C\x0E" "a problem with\xFF"
-	  		               "Y\x3D" "C\x10" "these facilities\xFF" "ES");
-	strcpy(screens[12][0], "F\x02" "Y\x05" "C\x0C" "Problem with\xFF" "Y\x20" "C\x10" "these facilities\xFF"
-	    		           "Y\x3D" "C\x11" "has been reported\xFF" "ES");
-	strcpy(screens[13][0], "F\x03" "Y\x05" "C\x09" "Push here\xFF" "Y\x20" "C\x0A" "to request\xFF"
-	    		           "Y\x3D" "C\x06" "a taxi\xFF" "ES");
-	strcpy(screens[14][0], "F\x02" "Y\x04" "C\x0E" "Taxi requested\xFF" "Y\x1A" "C\x11" "Taxi will be here\xFF"
-			               "Y\x30" "C\x0F" "at approx 11:35\xFF" "Y\x46" "C\x14" "Push again to cancel\xFF" "ES");
-	strcpy(screens[15][0], "F\x02" "Y\x05" "C\x0F" "Push to send an\xFF" "Y\x22" "C\x10" "AV technician to\xFF"
-	    		           "Y\x3D" "C\x0E" "meeting room 1\xFF" "ES");
-	strcpy(screens[16][0], "F\x03" "Y\x10" "C\x0D" "AV technician\xFF" "Y\x32" "C\x09" "requested\xFF" "ES");
-	strcpy(screens[17][0], "F\x03" "Y\x05" "C\x05" "An AV\xFF" "Y\x20" "C\x0D" "technician is\xFF"
-			               "Y\x3D" "C\x0C" "on their way\xFF" "ES");
-	strcpy(screens[18][0], "F\x03" "Y\x10" "C\x0C" "Push here if\xFF" "Y\x32" "C\x09" "you're OK\xFF" "ES");
-	strcpy(screens[19][0], "F\x03" "Y\x05" "C\x0C" "Thanks. I'll\xFF" "Y\x20" "C\x0D" "call you this\xFF" "Y\x3D" "C\x0A" "PM - Peter\xFF" "ES");
-	strcpy(screens[20][0], "F\x02" "Y\x05" "C\x0C" "Push here to\xFF" "Y\x20" "C\x0C" "request more\xFF"
-	      		           "Y\x3D" "C\x0F" "coffee capsules\xFF" "ES");
-	strcpy(screens[21][0], "F\x02" "Y\x05" "C\x0B" "More coffee\xFF" "Y\x20" "C\x0D" "capsules have\xFF"
-	      		           "Y\x3D" "C\x0E" "been requested\xFF" "ES");
-	strcpy(screens[22][0], "F\x02" "Y\x05" "C\x0C" "Push here if\xFF" "Y\x20" "C\x10" "you want a carer\xFF"
-	       		           "Y\x3D" "C\x0C" "to visit you\xFF" "ES");
-	strcpy(screens[23][0], "F\x03" "Y\x10" "C\x0C" "Your request\xFF" "Y\x32" "C\x0D" "has been sent\xFF" "ES");
-	strcpy(screens[24][0], "F\x02" "Y\x05" "C\x0C" "A carer will\xFF" "Y\x20" "C\x11" "visit you between\xFF"
-	         		       "Y\x3D" "C\x0F" "11:00 and 12:00\xFF" "ES");
-	strcpy(screens[25][0], "F\x02" "Y\2" "C\x0B" "Are you OK?\xFF" "Y\x16" "C\x11" "Please push below\xFF"
-	 		               "F\x03" "X\x1C" "Y\x39" "T\x02" "No\xFF"
-	                       "F\x03" "X\x7A" "Y\x39" "T\x03" "Yes\xFF"
-	 		               "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
-	 		               "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
-	strcpy(screens[26][0], "F\x02" "Y\x05" "C\x0C" "Push here if\xFF" "Y\x20" "C\x10" "printer supplies\xFF"
-	        		       "Y\x3D" "C\x07" "are low\xFF" "ES");
-	strcpy(screens[27][0], "F\x02" "X\x18" "Y\x0E" "T\x04" "Push\xFF" "X\x08" "Y\x24" "T\x08" "here for\xFF"
-	 		               "X\x16" "Y\x3C" "T\x05" "paper\xFF" "X\x7D" "Y\x0E" "T\x04" "Push\xFF" "X\x6D" "Y\x24"
-	 		               "T\x08" "here for\xFF" "X\x7B" "Y\x3C" "T\x05" "toner\xFF"
-	 		               "X\x02" "Y\x02" "B\x5A\x5C" "X\x03" "Y\x03" "B\x58\x5A"
-	           	  	  	   "X\x68" "Y\x02" "B\x5A\x5C" "X\x69" "Y\x03" "B\x58\x5A"
-	 		               "ES");
-	strcpy(screens[28][0], "F\x02" "X\x18" "Y\x0E" "T\x04" "Push\xFF" "X\x08" "Y\x24" "T\x08" "here for\xFF"
-	  		               "X\x16" "Y\x3C" "T\x05" "black\xFF" "X\x7D" "Y\x0E" "T\x04" "Push\xFF" "X\x6D" "Y\x24"
-	  		               "T\x08" "here for\xFF" "X\x6D" "Y\x3C" "T\x07" "Y/Cy/Mg\xFF"
-	  		               "X\x02" "Y\x02" "B\x5A\x5C" "X\x03" "Y\x03" "B\x58\x5A"
-	            	  	   "X\x68" "Y\x02" "B\x5A\x5C" "X\x69" "Y\x03" "B\x58\x5A"
-	  		               "ES");
-	strcpy(screens[29][0], "F\x02" "Y\x04" "C\x0F" "Low black toner\xFF" "Y\x1A" "C\x08" "reported\xFF"
-	 		               "Y\x30" "C\x12" "Push here if other\xFF" "Y\x46" "C\x14" "printer supplies low\xFF" "ES");
-	strcpy(screens[30][0], "F\x03" "Y\x10" "C\x0C" "Push here if\xFF" "Y\x32" "C\x0D" "you need help\xFF" "ES");
-	strcpy(screens[31][0], "F\x03" "Y\x10" "C\x0D" "I'm on my way\xFF" "Y\x32" "C\x07" "- Sarah\xFF" "ES");
-
-	for(s=0; s<32; s++)
-		for(i=0; i<128; i++)
-			if(screens[s][0][i] == 0xFF)
-				screens[s][0][i] = 0x00;
 }
 
 void Initialise_States(void)
@@ -1529,11 +1526,13 @@ void Initialise_States(void)
     //                               S   D    A   LD    LS   MS  MD   RS   RD   XV   XS    W   WS
 	static const uint8_t init[16] = {19, 19, 255,  20, 255, 255,  20, 255,  20, 255, 255, 255, 255}; // Push to Connect
 	static const uint8_t conn[16] = {20, 20, 255, 255, 255, 255, 255, 255, 255,   2,  21, 255, 255}; // Connecting
-	static const uint8_t conf[16] = {21, 21, 255, 255, 255, 255, 255, 255, 255,  13,   0, 255, 255}; // Configuring
-	static const uint8_t prob[16] = {23, 23, 255,  19, 255, 255,  19, 255,  19,  13,   0, 255, 255}; // Comms Problem
+	static const uint8_t conf[16] = {21, 21, 255,  19,  19,  19,  19,  19,  19,  13,   0, 255, 255}; // Configuring
+	static const uint8_t strt[16] = {22, 22, 255,   1, 255, 255,   1, 255,   1,  13,   0, 255, 255}; // Double-push to start
+	static const uint8_t prob[16] = {23, 23, 255,  19, 255, 255,  19, 255,  19,  255,  0, 255, 255}; // Comms Problem
 	memcpy(states[STATE_INITIAL], init, sizeof(init));
 	memcpy(states[STATE_CONNECTING], conn, sizeof(conn));
 	memcpy(states[STATE_CONFIG], conf, sizeof(conf));
+	memcpy(states[STATE_START], strt, sizeof(strt));
 	memcpy(states[STATE_PROBLEM], prob, sizeof(prob));
 }
 

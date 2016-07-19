@@ -784,59 +784,29 @@ uint8_t ecog_write_screen_data(void)
 {
   uint8_t f;                                                                            /* General loop counter */
   uint8_t y;                                                                            /* Y loop counter */
-  uint8_t buffer[25];                                                                   /* 1 scan line data */
-  uint8_t * bp;                                                                         /* Buffer pointer */
+  //uint8_t buffer[25];                                                                   /* 1 scan line data */
+  //uint8_t * bp;                                                                         /* Buffer pointer */
 
-//
-//dprintf("Inverse data\r\n");
-  //bp=ecog_buffer;                                                                       /* Point at start of display buffer */
-  //for(f=0; f<2; f++)
-  //for(y=0;y<96;y++)                                                                     /* Loop for all Y data */
-  //{
-    //ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_INVERSE);                        /* Scan line of data */
-  //}
-  //timers_sdelay(150);  // PCX Delay was 150
-//
-//dprintf("Black\r\n");
-  //for(f=0; f<12; f++)
-  //for(y=0;y<96;y++)                                                                     /* Loop for all Y data */
-  //{
-    //ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_BLACK);                          /* Scan line of data */
-  //}
+  for(f=0; f<1; f++)                                                                    /* Default is 4 */
+	  for(y=0;y<96;y++)                                                                 /* Loop for all Y data */
+	  {
+		  ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_BLACK);                    /* Scan line of data */
+	  }
   //timers_sdelay(150);  // PCX added
-//dprintf("White\r\n");
-  //for(f=0; f<12; f++)
-  //for(y=0;y<96;y++)                                                                     /* Loop for all Y data */
-  //{
-    //ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_WHITE);                          /* Scan line of data */
-  //}
+  for(f=0; f<2; f++)                                                                    /* Default is 4 */
+	  for(y=0;y<96;y++)                                                                 /* Loop for all Y data */
+	  {
+		  ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_WHITE);                    /* Scan line of data */
+	  }
   //timers_sdelay(150);  // PCX added
-//dprintf("Black\r\n");
-  //for(f=0; f<2; f++)
-  for(f=0; f<4; f++)
-  for(y=0;y<96;y++)                                                                     /* Loop for all Y data */
-  {
-    ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_BLACK);                          /* Scan line of data */
-  }
-  //timers_sdelay(150);  // PCX added
-//dprintf("White\r\n");
-  for(f=0; f<4; f++)
-  for(y=0;y<96;y++)                                                                     /* Loop for all Y data */
-  {
-    ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_WHITE);                          /* Scan line of data */
-  }
-  //timers_sdelay(150);  // PCX added
-//
-//
   ecog_write_inverse(1);
-//dprintf("Normal\r\n");
 
   //for(f=0; f<6; f++)   // "Low temp"
-  for(f=0; f<12; f++)   // "Test temp"
-  for(y=0;y<96;y++)                                                                     /* Loop for all Y data */
-  {
-    ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_NORMAL);                         /* Scan line of data */
-  }
+  for(f=0; f<6; f++)   // "Test temp" Default is 12
+	  for(y=0;y<96;y++)                                                                 /* Loop for all Y data */
+	  {
+		  ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_NORMAL);                    /* Scan line of data */
+	  }
 }
 
 
@@ -961,10 +931,6 @@ uint8_t ecog_write_border(void)
   uint8_t scan;                                                                         /* Scan data loop counter */
   uint8_t db;                                                                           /* Data byte loop counter */
 
-  //sprintf(debug_buff, "ecog_write_border, button_irq: %d\r\n", button_irq);
-  //DEBUG_TX(debug_buff);
-  //if(button_irq)
-  //	return 0;
   check_busy();                                                                         /* Ensure we're not busy */
   ecog_send(0x70);                                                                      /* Set index command */
   ecog_single(0x0a);                                                                    /* Send index */
@@ -984,9 +950,6 @@ uint8_t ecog_write_border(void)
   }
   ECOG_CS_OFF;                                                                          /* Disable chip */
   ecog_write(0x02,0x07);                                                                /* Turn on output enable */
-  //timers_sdelay(300);
-  //if(button_irq)
-  //	  return 0;
   timers_sdelay(150);
 }
 
@@ -1049,13 +1012,13 @@ uint8_t ecog_discharge_capacitors(void)
  Exits:                  1=passed, 0=failed
  Date:                   03/11/15
  *****************************************************/
-uint8_t ecog_update_display(uint8_t powered, uint8_t turn_on_radio)
+uint8_t ecog_update_display(uint8_t powered)
 {
   uint8_t init_ok;
   if (!powered)
   {
 	  //UART1_Write_Text("Powering display\r\n");
-	  ecog_power_display();                                                                 /* Power up the display */
+	  ecog_power_display();                                                              /* Power up the display */
 	  //UART1_Write_Text("Display powered\r\n");
 	  init_ok = ecog_initialise_cog();
   }
@@ -1070,62 +1033,45 @@ uint8_t ecog_update_display(uint8_t powered, uint8_t turn_on_radio)
     //UART1_Write_Text("Writing border frame\r\n");
     ecog_write_border();                                                                /* Write border data */
     //UART1_Write_Text("Discharging capacitors\r\n");
-    if(turn_on_radio)
-    {
-    	HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_SET);
-    	HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_SET);
-    	HAL_UART_MspInit(&huart3);
-    }
     ecog_discharge_capacitors();                                                        /* Discharge capacitors and power down display */
-    if(turn_on_radio)
-    	HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_RESET);
+
     return(1);                                                                          /* Success */
   }
   else
   {
     UART1_Write_Text("Failed initialising COG\r\n");
     UART1_Write_Text("Discharging capacitors\r\n");
-    {
-    	HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_SET);
-    	HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_SET);
-    	HAL_UART_MspInit(&huart3);
-    }
     ecog_discharge_capacitors();                                                          /* Discharge capacitors */
-    if(turn_on_radio)
-    	HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_RESET);
     return(0);
   }
 }
 
 uint8_t ecog_write_inverse(uint8_t powered)
 {
-  uint8_t f;                                                                            /* General loop counter */
-  uint8_t y;                                                                            /* Y loop counter */
+  uint8_t f;                                                                          /* General loop counter */
+  uint8_t y;                                                                          /* Y loop counter */
 
   if(!powered)
   {
 	  //UART1_Write_Text("Powering display\r\n");
-	  ecog_power_display();                                                                /* Power up the display */
+	  ecog_power_display();                                                           /* Power up the display */
 	  //UART1_Write_Text("Display powered\r\n");
   }
-  if(ecog_initialise_cog())                                                             /* Initialise COG driver? */
+  if(ecog_initialise_cog())                                                           /* Initialise COG driver? */
   {
-    //UART1_Write_Text("Writing inverse data\r\n");
-	    //for(f=0; f<3; f++)          // "Low" temp
-	  	//DEBUG_TX("Starting to init screen\r\n");
-	    for(f=0; f<3; f++)            // Test
-	    {
-    	for(y=0;y<96;y++)                                                                     /* Loop for all Y data */
-    	{
-    		ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_INVERSE);                         /* Scan line of data */
-    	}
-	    }
+	  for(f=0; f<1; f++)                                                              /* Default is 3 */
+	  {
+		  //for(y=0;y<96;y++)                                                           /* Loop for all Y data */
+		  //{
+			  //ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_INVERSE);            /* Scan line of data */
+		  //}
+	  }
   }
   else
   {
 	  UART1_Write_Text("Failed initialising COG\r\n");
       UART1_Write_Text("Discharging capacitors\r\n");
-      ecog_discharge_capacitors();                                                          /* Discharge capacitors */
+      ecog_discharge_capacitors();                                                    /* Discharge capacitors */
       return(0);
   }
 }
@@ -1142,7 +1088,7 @@ uint8_t ecog_write_inverse(uint8_t powered)
 uint8_t ecog_init(void)
 {
   ecog_cls();                                                                           /* Clear screen */
-  return(ecog_update_display(0, 0));                                                        /* Update display */
+  return(ecog_update_display(0));                                                       /* Update display */
 }
 
 
@@ -1158,7 +1104,7 @@ uint8_t ecog_disable_display(void)
   if(ecog_display_enabled)                                                              /* Currently enabled? */
   {
     ecog_cls();                                                                         /* Clear display */
-    ecog_update_display(0, 0);                                                              /* Update display */
+    ecog_update_display(0);                                                             /* Update display */
     ecog_display_enabled=0;                                                             /* Display is disabled */
   }
 }
@@ -1176,6 +1122,6 @@ uint8_t ecog_enable_display(void)
   if(!ecog_display_enabled)                                                             /* Currently enabled? */
   {
     ecog_display_enabled=1;
-    ecog_update_display(0, 0);                                                              /* Update display */
+    ecog_update_display(0);                                                              /* Update display */
   }
 }

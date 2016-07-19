@@ -34,7 +34,8 @@
 #define LPRS_HEADER_LENGTH 	6
 #define ARRAY_CONCAT(TYPE, A, An, B, Bn) \
   (TYPE *)array_concat((const void *)(A), (An), (const void *)(B), (Bn), sizeof(TYPE));
-#define DEBUG_TX(MESSAGE)  (Debug_Tx(&huart1, (uint8_t*)MESSAGE, (COUNTOF(MESSAGE) - 1)))
+//#define DEBUG_TX(MESSAGE)  (Debug_Tx(&huart1, (uint8_t*)MESSAGE, (COUNTOF(MESSAGE) - 1)))
+#define DEBUG_TX(MESSAGE)  (Debug_Tx(&huart1, (uint8_t*)MESSAGE, (strlen(MESSAGE))))
 #define RADIO_TXS(MESSAGE, LENGTH)  (Radio_Tx(&huart3, (uint8_t*)MESSAGE, LENGTH))
 #define RADIO_TXIT(MESSAGE, LENGTH)  (Radio_Tx_IT(&huart3, (uint8_t*)MESSAGE, LENGTH))
 #define DEBUG_TXS(MESSAGE, LENGTH)  (Debug_Tx(&huart1, (uint8_t*)MESSAGE, LENGTH))
@@ -45,6 +46,7 @@
 #define SPI_RX(MESSAGE, LENGTH)  (SPI_Rx(&hspi1, (uint8_t*)MESSAGE, LENGTH))
 #define SPI_TXRX(TXMESSAGE, RXMESSAGE, LENGTH)  (SPI_TxRx(&hspi1, (uint8_t*)TXMESSAGE, (uint8_t*)RXMESSAGE, LENGTH))
 #define UART1_Write_Text(MESSAGE) (Debug_Tx(&huart1, (uint8_t*)MESSAGE, (COUNTOF(MESSAGE) - 1)))
+#define SIXTEENTHS_NOW (DWT_Get() >> 21)
 
  extern uint8_t 			button_irq;
  extern char 				debug_buff[64];

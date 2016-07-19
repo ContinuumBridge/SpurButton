@@ -150,14 +150,9 @@ uint32_t Cbr_Now(void)
 	RTC_DateTypeDef sdatestructureget;
 	HAL_RTC_GetTime(&hrtc, &rtc_time, RTC_FORMAT_BIN);
 	HAL_RTC_GetDate(&hrtc, &sdatestructureget, RTC_FORMAT_BIN);
-	//sprintf(debug_buff,"Cbr_Now: %02d:%02d:%02\r\n",rtc_time.Hours, rtc_time.Minutes, rtc_time.Seconds);
+	//sprintf(debug_buff,"Cbr_Now: %02d:%02d:%02d:%d\r\n",rtc_time.Hours, rtc_time.Minutes, rtc_time.Seconds, sixteenths);
 	//DEBUG_TX(debug_buff);
-	return Cbr_Time(rtc_time.Hours, rtc_time.Minutes, rtc_time.Seconds);
-}
-
-uint32_t Cbr_Time(uint8_t h, uint8_t m, uint8_t s)
-{
-	return h*3600 + m*60 +s;
+	return rtc_time.Hours*3600 + rtc_time.Minutes*60 + rtc_time.Seconds;
 }
 
 void RTC_Delay(uint32_t delay)    // Delay is in seconds
@@ -169,20 +164,14 @@ void RTC_Delay(uint32_t delay)    // Delay is in seconds
 	HMS(delay, &h, &m, &s);
 	HAL_RTC_GetTime(&hrtc, &rtcTime, RTC_FORMAT_BIN);
 	HAL_RTC_GetDate(&hrtc, &sdatestructureget, RTC_FORMAT_BIN);  // Needed after HAL_RTC_GetTime to prevent locking
-	strcpy(debug_buff, "                                                               ");
-	sprintf(debug_buff,"Time now: %02d:%02d:%02d\r\n",rtcTime.Hours, rtcTime.Minutes, rtcTime.Seconds);
-	DEBUG_TX(debug_buff);
     cs = (rtcTime.Seconds + s)/60; s = (rtcTime.Seconds + s)%60;
     cm = (rtcTime.Minutes + m + cs)/60; m = (rtcTime.Minutes + m + cs)%60;
     h = (rtcTime.Hours + h + cm)%24;
-	sprintf(debug_buff,"Alarm at: %02d:%02d:%02d\r\n",h ,m, s);
+	sprintf(debug_buff,"Now: %02d:%02d:%02d. Alarm at: %02d:%02d:%02d\r\n", rtcTime.Hours, rtcTime.Minutes, rtcTime.Seconds, h ,m, s);
 	DEBUG_TX(debug_buff);
-
 	sAlarm.AlarmTime.Hours = h;
 	sAlarm.AlarmTime.Minutes = m;
 	sAlarm.AlarmTime.Seconds = s;
-	//sAlarm.AlarmTime.SubSeconds = ss;
-	//sAlarm.AlarmTime.SubSeconds = 0x0;
 	sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
 	sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
 	sAlarm.AlarmMask = RTC_ALARMMASK_NONE;
