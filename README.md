@@ -108,10 +108,10 @@ reserved for system use (28, 29, 30, 31), leaving 28 for a user program. The fol
 |  6     | MD    | State to go to on middle double-push (left & right together). 0xFF = ignore |
 |  7     | RS    | State to go to on right single-push. 0xFF = ignore |
 |  8     | RD    | State to go to on right double-push. 0xFF = ignore |
-|  9     | XV    | When button receives this value, go to state RS. 0xFF = ignore |
-|  A     | XS    | State to go to when value RV is received |
-|  B     | W     | Wait in this state for W seconds before going to state DWS. 0xFF = igore |
-|  C     | WS    | Go to this state after W seconds |
+|  9     | XV    | When button receives this application value, go to state XS. 0xFF = ignore |
+|  A     | XS    | State to go to when application value XV is received |
+|  B     | WV    | Wait in this state for W seconds before going to state WS. 0xFF = igore |
+|  C     | WS    | Go to this state after WV seconds |
 |  D     | -     | Reserved for future use |
 |  E     | -     | Reserved for future use |
 |  F     | -     | Reserved for future use |
@@ -128,12 +128,12 @@ Here is a simple example. This is the "standard" application:
 
 The state table is as follows:
 
-| S | D | A | LD | LS | MS | MD | RS | RD | XV | XS | W | WS |
-|---|---|---|----|----|----|----|----|----|----|----|---|----|
-| 0 | 1 | FF| FF | 02 | 02 | FF | 02 | FF | 01 | 3  | FF| FF |
-| 1 | 1 | 01| FF | 02 | 02 | FF | 02 | FF | 01 | 3  | FF| FF |
-| 2 | 2 | 02| 01 | FF | FF | 01 | FF | 01 | 01 | 3  | FF| FF |
-| 3 | 3 | FF| 01 | FF | FF | 01 | FF | 01 | 00 | 1  | FF| FF |
+| S | D | A | LD | LS | MS | MD | RS | RD | XV | XS | WV | WS |
+|---|---|---|----|----|----|----|----|----|----|----|----|----|
+| 0 | 1 | FF| FF | 02 | 02 | FF | 02 | FF | 01 | 3  | FF | FF |
+| 1 | 1 | 01| FF | 02 | 02 | FF | 02 | FF | 01 | 3  | FF | FF |
+| 2 | 2 | 02| 01 | FF | FF | 01 | FF | 01 | 01 | 3  | FF | FF |
+| 3 | 3 | FF| 01 | FF | FF | 01 | FF | 01 | 00 | 1  | FF | FF |
 
 An example use of this is with the following screens:
 
@@ -169,3 +169,6 @@ An example use of this is with the following screens:
 * Screen 2: "The problem is being reported"
 * Screen 3: "Low printer supplies reported"
 * Screen 4: "Fault with this printer has been reported"
+
+**Application Values**
+If the first byte of the configuration is the character A, then this signifies an application value. The use of this is defined in the previous section, namely, if the button is in a state where it is expecting this value, receiving it causes the button to go into a new state. In the current implementation, only one value is strictly necessary. Eg: the value sent can always be 0x01.
