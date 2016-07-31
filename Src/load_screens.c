@@ -77,7 +77,7 @@ void Load_Demo_Screens(void)
 			  	  	  	  "Y\x47" "l\x03" "bad\xFF" "Y\x31" "r\x08" "Push for\xFF"
 			              "Y\x47" "r\x04" "good\xFF" "X\x02" "Y\x2D" "B\x5A\x32" "X\x03" "Y\x2E" "B\x5A\x32"
 			              "X\x68" "Y\x2D" "B\x5A\x32" "X\x69" "Y\x2E" "B\x5A\x32" "ES");
-	strcpy(screens[11][0], "F\x02" "Y\x04" "X\x01" "T\x13" "10:00 David Gilmour\xFF" "Y\x1A" "T\x12" "11:30 Nancy Wilson\xFF"
+	strcpy(screens[11][0], "F\x02" "Y\x04" "X\x01" "T\x11" "10:00 David Shard\xFF" "Y\x1A" "T\x10" "11:30 Nancy Boyd\xFF"
 			               "Y\x30" "C\x10" "Push for options\xFF" "Y\x46" "C\x13" "or to start meeting\xFF" "ES");
 	strcpy(screens[12][0], "F\x02" "Y\x04" "l\x04" "Push\xFF" "Y\x1A" "l\x07" "left to\xFF" "Y\x30" "l\x05" "start\xFF"
 			               "Y\x46" "l\x07" "meeting\xFF"
@@ -86,7 +86,7 @@ void Load_Demo_Screens(void)
 					       "X\x02" "Y\x02" "B\x5A\x5C" "X\x03" "Y\x03" "B\x58\x5A"
 			          	    "X\x68" "Y\x02" "B\x5A\x5C" "X\x69" "Y\x03" "B\x58\x5A"
 					        "ES");
-	strcpy(screens[13][0], "F\x02" "Y\x04" "X\x01" "T\x0C" "10:00 In use\xFF" "Y\x1A" "T\x12" "11:30 Nancy Wilson\xFF"
+	strcpy(screens[13][0], "F\x02" "Y\x04" "X\x01" "T\x0C" "10:00 In use\xFF" "Y\x1A" "T\x10" "11:30 Nancy Boyd\xFF"
 			               "Y\x30" "C\x10" "Push for options\xFF" "Y\x46" "C\x12" "or to end meeting\xFF" "ES");
 	strcpy(screens[14][0], "F\x02" "Y\x04" "l\x04" "Push\xFF" "Y\x1A" "l\x07" "left to\xFF" "Y\x30" "l\x03" "end\xFF"
 			               "Y\x46" "l\x07" "meeting\xFF"
@@ -97,7 +97,7 @@ void Load_Demo_Screens(void)
 					        "ES");
 	strcpy(screens[15][0], "F\x02" "Y\x04" "X\x01" "C\x0E" "Rooms free now\xFF" "Y\x1A" "T\x10" "Faraday: 30 mins\xFF"
 			               "Y\x30" "T\x10" "Maxwell: 60 mins\xFF" "Y\x46" "T\x10" "Marconi: 60 mins\xFF" "ES");
-	strcpy(screens[16][0], "F\x02" "Y\x04" "X\x01" "T\x0E" "Now  Available\xFF" "Y\x1A" "T\x12" "11:30 Nancy Wilson\xFF"
+	strcpy(screens[16][0], "F\x02" "Y\x04" "X\x01" "T\x0E" "Now  Available\xFF" "Y\x1A" "T\x10" "11:30 Nancy Boyd\xFF"
 			               "Y\x30" "C\x0B" "Push to use\xFF" "Y\x46" "C\x08" "room now\xFF" "ES");
 	strcpy(screens[17][0], "F\x02" "Y\x04" "X\x01" "C\x13" "Time booked: 0 mins\xFF" "Y\x1A" "C\x12" "Push right to book\xFF"
 			               "Y\x30" "C\x0B" "for 15 mins\xFF" "Y\x46" "C\x0C" "left to quit\xFF" "ES");
@@ -106,7 +106,7 @@ void Load_Demo_Screens(void)
 	strcpy(screens[19][0], "F\x02" "Y\x04" "X\x01" "C\x14" "Time booked: 30 mins\xFF" "Y\x1A" "C\x12" "Push right to book\xFF"
 			               "Y\x30" "C\x10" "for 15 more mins\xFF" "Y\x46" "C\x0F" "left to confirm\xFF" "ES");
 	strcpy(screens[20][0], "F\x02" "Y\x04" "X\x01" "T\x0B" "Now  In use\xFF" "Y\x1A" "T\x0F" "10:45 Available\xFF"
-			               "Y\x30" "T\x12" "11:30 Nancy Wilson\xFF" "Y\x46" "C\x10" "Push for options\xFF" "ES");
+			               "Y\x30" "T\x10" "11:30 Nancy Boyd\xFF" "Y\x46" "C\x10" "Push for options\xFF" "ES");
 	strcpy(screens[21][0], "F\x03" "Y\x05" "C\x09" "Push here\xFF" "Y\x20" "C\x0A" "to request\xFF"
 	    		           "Y\x3D" "C\x06" "a taxi\xFF" "ES");
 	strcpy(screens[22][0], "F\x02" "Y\x04" "C\x0E" "Taxi requested\xFF" "Y\x1A" "C\x11" "Taxi will be here\xFF"

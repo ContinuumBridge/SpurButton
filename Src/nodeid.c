@@ -26,8 +26,14 @@
  //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x19};  // 25
  //uint8_t 			node_id[] 			= {0x00, 0x00, 0x00, 0x1A};  // 26
 // 27 MobileWorks
+// 28 Martin Spur 2
+// 29 Martin Spur 2
+// 30 Spare
+// 31 Martin Spur 2
+// 32 Steve Spur 2
+// 33 Replacement old one
 
-const uint32_t node_id_int = 17;
+const uint32_t node_id_int = 33;
 
 void Set_Node_ID(uint8_t *node_id)
 {

@@ -27,6 +27,7 @@
 #include "glue.h"
 #include "load_screens.h"
 #include "nodeid.h"
+#include "ecog_driver.h"
 
 /* USER CODE END Includes */
 
@@ -42,6 +43,8 @@
 //#define FONT_3 					Arial_Rounded_MT_Bold26x27
 #define FONT_3 					Arial_Narrow18x26
 
+#define STATE_TEST				16
+#define STATE_INITIAL_TEST		26
 #define STATE_SENDING			18
 #define STATE_INITIAL 			19
 #define STATE_CONNECTING 		20
@@ -59,13 +62,15 @@
 #define SEND_OK 				0
 #define SEND_TIMEOUT 			1
 #define BEACON_SEARCH_TIME 		10   // Units: 1 second
-#define ACK_SEARCH_TIME         3    // Units: 1 second
+#define FIRST_ACK_SEARCH_TIME   1    // Units: 1 second
+#define ACK_SEARCH_TIME         2    // Units: 1 second
 #define ONE_DAY 				(24*60*60)
 #define T_LONG_PRESS          	2    // Units: 1 second
-#define T_DOUBLE_PRESS_16		8   // Units: 1/16 second
+#define T_DOUBLE_PRESS_16		12   // Units: 1/16 second
 #define T_RESET_PRESS         	8    // Units: 1 second
 #define T_MAX_RESET_PRESS		20   // To catch failure case
 
+#define MAX_SCREEN 				38
 #define REGIONS 2
 
 // Function codes:
@@ -120,7 +125,7 @@
 
 uint8_t 			node_id[] 				= {0x00, 0x00, 0x00, 0x00};
 
-char 				debug_buff[64] 			= {0};
+char 				debug_buff[128] 		= {0};
 char 				screens[MAX_SCREEN][1][194];
 uint8_t				states[24][16]     		= {0xFF};
 
@@ -148,10 +153,10 @@ uint8_t 			rtc_irq					= 0;
 uint16_t 			pressed_button;
 uint8_t 			running 				= 0;
 GPIO_PinState  		button_state;
-uint8_t				current_state			= STATE_INITIAL;
+uint8_t				current_state			= STATE_INITIAL_TEST;
 int32_t				button_press_time[2] 	= {-100, -100};
 uint32_t			last_press_sixteenths[2] = {0, 0};
-uint8_t				last_action_reset[2]    = {0, 0};
+uint8_t				check_long[2]    = {0, 0};
 uint8_t				stop_mode				= 1;
 uint8_t				start_from_reset		= 1;
 
@@ -183,8 +188,8 @@ void On_RTC_IRQ(void);
 void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState button_state);
 void Initialise_States(void);
 void On_NewState(void);
-void Read_Battery(uint8_t send);
-
+int Read_Battery(uint8_t send);
+void Configure_And_Test(void);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -263,52 +268,13 @@ int main(void)
 	  DEBUG_TX(debug_buff);
   }
   */
-  Read_Battery(0);
 
   Load_Normal_Screens();
   Initialise_States();
   ecog_init();
 
   // Reset radio
-  Radio_On(1);
-  RADIO_TXS("ER_CMD#R0", 9);
-  status = Rx_Message(Rx_Buffer, &length, 3000);
-  DEBUG_TX("Received: ");
-  DEBUG_TXS(Rx_Buffer, 9);
-  DEBUG_TX("\r\n\0");
-  Delay_ms(100);
-  RADIO_TXS("ACK", 3);
-  Delay_ms(200);
-
-  // Set OTA data rate to 1200 bps
-  RADIO_TXS("ER_CMD#B0", 9);
-  status = Rx_Message(Rx_Buffer, &length, 3000);
-  DEBUG_TX("Received: ");
-  DEBUG_TXS(Rx_Buffer, 9);
-  DEBUG_TX("\r\n\0");
-  Delay_ms(100);
-  RADIO_TXS("ACK", 3);
-  Delay_ms(200);
-
-  RADIO_TXS("Hello World", 11);
-  DEBUG_TX("Sent Hello World\r\n\0");
-  Delay_ms(50);
-  for (i=0; i<128; i++)
-	  Rx_Buffer[i] = 45;
-  status = Rx_Message(Rx_Buffer, &length, 5000);
-  if (status == HAL_OK)
-  {
-	  DEBUG_TX("Received: ");
-	  DEBUG_TXS(Rx_Buffer, 32);
-	  DEBUG_TX("\r\n\0");
-	  sprintf(debug_buff, "Length %d\r\n", length);
-	  DEBUG_TX(debug_buff);
-  }
-  else
-  	  DEBUG_TX("Receive problem\r\n\0");
-  Radio_Off();
-
-  Set_Display(STATE_INITIAL);
+  Configure_And_Test();
   Radio_Off();
   DEBUG_TX("Waiting\r\n\0");
   HAL_UART_MspDeInit(&huart1);
@@ -326,7 +292,7 @@ int main(void)
 	  {
 		  SYSCLKConfig_STOP();
 		  HAL_UART_MspInit(&huart1);
-		  DEBUG_TX("*** Main loop ***\r\n\0");
+		  DEBUG_TX("*** Main loop ***\r\n\0 ");
 	  }
 	  if(button_irq)
 	  {
@@ -638,6 +604,7 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 	int 				side 					= LEFT_SIDE;
 	uint32_t 			pressed_time 			= 0;
 	uint32_t 			now;
+	static uint8_t		check_double[2]			= {0, 0};
 
 	if (GPIO_Pin == PUSH_RIGHT_Pin)
 		side = RIGHT_SIDE;
@@ -647,21 +614,42 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 		return PRESS_NONE;
 
 	now = Cbr_Now();
+	//check_double = 1;
 	//sprintf(debug_buff,"16th now: %u, last %u, side: %d, state: %d\r\n", SIXTEENTHS_NOW, last_press_sixteenths[side], (int)side, (int)button_state);
 	//DEBUG_TX(debug_buff);
 	//button_state = HAL_GPIO_ReadPin(GPIOA, GPIO_Pin);
+	//sprintf(debug_buff, "side: %d, doub: %d:%d, long: %d:%d, state: %d, pressed: %d\r\n",
+	//		side, check_double[0], check_double[1], check_long[0], check_long[1],
+	//		button_state, button_pressed);
+	DEBUG_TX(debug_buff);
 	if(button_pressed && (button_state == GPIO_PIN_RESET))
 	{
-		last_action_reset[side] = 0;  // To prevent false longs
-		if((last_press_sixteenths[side] != 0) && ((SIXTEENTHS_NOW - last_press_sixteenths[side]) < T_DOUBLE_PRESS_16))
-	  	{
-	   		stop_mode = 1;
-	   		//if(side == LEFT_SIDE) DEBUG_TX("AL\r\n\0"); else DEBUG_TX("AR\r\n\0");
-	   		if(side == LEFT_SIDE)
-	   			return PRESS_LEFT_DOUBLE;
-	   		else
-	   			return PRESS_RIGHT_DOUBLE;
-	   	}
+		check_long[side] = 0;  // Because we need to go through !button_pressed on the way to checking for longs
+		if(check_double[side])
+		{
+			check_double[0] = 0; check_double[1] = 0;
+			/*
+			if((last_press_sixteenths[side] != 0) && ((SIXTEENTHS_NOW - last_press_sixteenths[side]) < T_DOUBLE_PRESS_16))
+			{
+				stop_mode = 1;
+				if(side == LEFT_SIDE) DEBUG_TX("AL\r\n\0"); else DEBUG_TX("AR\r\n\0");
+				if(side == LEFT_SIDE)
+					return PRESS_LEFT_DOUBLE;
+				else
+					return PRESS_RIGHT_DOUBLE;
+			}
+			else
+				if(side == LEFT_SIDE) DEBUG_TX("AAL\r\n\0"); else DEBUG_TX("AAR\r\n\0");
+	   			stop_mode = 0;
+				return PRESS_NONE;
+			*/
+			stop_mode = 1;
+			if(side == LEFT_SIDE) DEBUG_TX("AL\r\n\0"); else DEBUG_TX("AR\r\n\0");
+			if(side == LEFT_SIDE)
+				return PRESS_LEFT_DOUBLE;
+			else
+				return PRESS_RIGHT_DOUBLE;
+		}
 	   	else
 	   	{
 	   		last_press_sixteenths[side] = SIXTEENTHS_NOW;
@@ -670,17 +658,18 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 	   		else
 	   			Radio_Off();
 	   		stop_mode = 0;
-	   		//if(side == LEFT_SIDE) DEBUG_TX("BL\r\n\0"); else DEBUG_TX("BR\r\n\0");
+	   		if(side == LEFT_SIDE) DEBUG_TX("BL\r\n\0"); else DEBUG_TX("BR\r\n\0");
 	   		return PRESS_NONE;
 	   	}
 	}
 	else if(!button_pressed)
 	{
   		button_press_time[side] = now;  // Put these here to prevent false longs if set is missed
-   		last_action_reset[side] = 1;    // Put these here to prevent false longs if set is missed
+   		check_long[side] = 1;    // Put these here to prevent false longs if set is missed
+		check_double[0] = 0; check_double[1] = 0;
 		last_press_sixteenths[side] = SIXTEENTHS_NOW;
 		stop_mode = 1;
-   		//if(side == LEFT_SIDE) DEBUG_TX("CL\r\n\0"); else DEBUG_TX("CR\r\n\0");
+   		if(side == LEFT_SIDE) DEBUG_TX("CL\r\n\0"); else DEBUG_TX("CR\r\n\0");
 		if(side == LEFT_SIDE)
 			return PRESS_LEFT_SINGLE;
 		else
@@ -688,9 +677,9 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 	}
 	else if(button_state == GPIO_PIN_SET)
 	{
-		if(last_action_reset[side])
+		if(check_long[side])
 		{
-			last_action_reset[0] = 0; last_action_reset[1] = 0;
+			check_long[0] = 0; check_long[1] = 0;
 			pressed_time = now - button_press_time[side];
 			//sprintf(debug_buff,"pressed_time: %d\r\n", (int)pressed_time);
 			//DEBUG_TX(debug_buff);
@@ -703,7 +692,7 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 			else if((pressed_time > T_LONG_PRESS) && (pressed_time < T_MAX_RESET_PRESS))
 			{
 				stop_mode = 1;
-		   		//if(side == LEFT_SIDE) DEBUG_TX("DL\r\n\0"); else DEBUG_TX("DR\r\n\0");
+		   		if(side == LEFT_SIDE) DEBUG_TX("DL\r\n\0"); else DEBUG_TX("DR\r\n\0");
 				if(side == LEFT_SIDE)
 					return PRESS_LEFT_LONG;
 				else
@@ -711,19 +700,31 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 			}
 			else
 			{
-		   		//if(side == LEFT_SIDE) DEBUG_TX("EL\r\n\0"); else DEBUG_TX("ER\r\n\0");
+		   		if(side == LEFT_SIDE) DEBUG_TX("EL\r\n\0"); else DEBUG_TX("ER\r\n\0");
+		   		check_double[side] = 1;
 				return PRESS_NONE;
 			}
 		}
 		else
 		{
-	   		//if(side == LEFT_SIDE) DEBUG_TX("FL\r\n\0"); else DEBUG_TX("FR\r\n\0");
+	   		if(side == LEFT_SIDE) DEBUG_TX("FL\r\n\0"); else DEBUG_TX("FR\r\n\0");
+			check_long[0] = 0; check_long[1] = 0;  // To reset the "other side"
+	   		check_double[side] = 1;
+			stop_mode = 0;
 			return PRESS_NONE;
 		}
 	}
-	// Should not ever get here, but just in case
-	stop_mode = 1;
-	//DEBUG_TX("G\r\n\0");
+	else
+	{
+		// Should not ever get here, but just in case
+		stop_mode = 1;
+		//DEBUG_TX("G\r\n\0");
+		sprintf(debug_buff, "G sideL %d, doub: %d:%d, long: %d:%d, state: %d, pressed: %d\r\n",
+				side, check_double[0], check_double[1], check_long[0], check_long[1],
+				button_state, button_pressed);
+		DEBUG_TX(debug_buff);
+		return PRESS_NONE;
+	}
 	return PRESS_NONE;
 }
 
@@ -744,14 +745,21 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 	static uint8_t wait_demo;
 
 	button_press = On_Button_Press(button_pressed, GPIO_Pin, button_state);
-	sprintf(debug_buff, "Press: %d\r\n", button_press);
+	sprintf(debug_buff, "P: %d\r\n", button_press);
 	DEBUG_TX(debug_buff);
 
 	if(button_press == PRESS_NONE)
 	{
 		return;
 	}
-	if(current_state == STATE_INITIAL)
+	if(current_state == STATE_INITIAL_TEST)
+	{
+		current_state = STATE_INITIAL;
+		Radio_On(1);             // Need this to properly
+		Radio_Off();             // enter low power mode
+		Set_Display(STATE_INITIAL);
+	}
+	else if(current_state == STATE_INITIAL)
 	{
 		DEBUG_TX("node_state is initial\r\n\0");
 		if((button_press == PRESS_RIGHT_LONG) || (button_press == PRESS_LEFT_LONG))
@@ -828,6 +836,11 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 					current_state = states[current_state][S_RD];
 				}
 				break;
+			case PRESS_LEFT_LONG:
+			case PRESS_RIGHT_LONG:
+				current_state = STATE_TEST;
+				Configure_And_Test();
+				return;
 			default:
 				DEBUG_TX("Warning. Undefined button_press\r\n\0");
 				current_state = states[current_state][0];
@@ -847,13 +860,13 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 void On_NewState(void)
 {
 	uint8_t alert_id[] = {0x00, 0x00};
-	sprintf(debug_buff, "On_NewState, state: %d\r\n", current_state);
+	sprintf(debug_buff, "On_NewState, state: %d\r\n\0", current_state);
 	DEBUG_TX(debug_buff);
 	if(states[current_state][S_A] != 0xFF)
 	{
 		Host_Ready();
 		alert_id[1] = states[current_state][S_A]; alert_id[0] = 0x00;
-		sprintf(debug_buff, "Sending alert: %x %x\r\n", alert_id[0], alert_id[1]);
+		sprintf(debug_buff, "Sending alert: %x %x\r\n\0", alert_id[0], alert_id[1]);
 		DEBUG_TX(debug_buff);
 		Send_Message(f_alert, 2, alert_id, 1, 0);
 	}
@@ -864,10 +877,10 @@ void On_NewState(void)
 	}
 	if(states[current_state][S_W] != 0xFF)  // Wait in this state for a fixed time
 	{
-		DEBUG_TX("On_NewState delay");
+		DEBUG_TX("On_NewState delay\r\n\0");
 		RTC_Delay(states[current_state][S_W]);
-		current_state = states[current_state][S_WS];
-		On_NewState();
+		//current_state = states[current_state][S_WS];
+		//On_NewState();
 	}
 }
 
@@ -1081,8 +1094,10 @@ void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t 
 
 void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 {
-	static uint8_t local_function;
-	uint8_t found = 0;
+	static uint8_t 		local_function;
+	uint8_t 			found 					= 0;
+	uint16_t 			search_time;
+
 	sprintf(debug_buff, "Send attempt: %d\r\n", send_attempt);
 	DEBUG_TX(debug_buff);
 	if(send_attempt == 4)
@@ -1110,7 +1125,11 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 	RADIO_TXS(tx_message, tx_length);
 	if(ack)
 	{
-		if (Message_Search(node_address, Rx_Buffer, ACK_SEARCH_TIME) == SEARCH_OK)
+		if(send_attempt == 0)
+			search_time = FIRST_ACK_SEARCH_TIME;
+		else
+			search_time = ACK_SEARCH_TIME;
+		if (Message_Search(node_address, Rx_Buffer, search_time) == SEARCH_OK)
 			found = 1;
 		if(found)
 		{
@@ -1314,7 +1333,7 @@ void Store_Config(void)
 			Set_Display(current_screen);
 		}
 	}
-	else if(strncmp(Rx_Buffer+pos, "C", 1) == 0)
+	else if(strncmp(Rx_Buffer+pos, "A", 1) == 0)
 	{
 		app_value = Rx_Buffer[pos+1];
 		sprintf(debug_buff, "Application value updated:%d\r\n", app_value);
@@ -1327,8 +1346,6 @@ void Store_Config(void)
 	}
 	else if(strncmp(Rx_Buffer+pos, "M", 1) == 0)
 	{
-		for(i=0; i<64; i++)
-			debug_buff[i] = 0x20;
 		s = Rx_Buffer[pos+1];
 		for(i=0; i<16; i++)
 		{
@@ -1345,10 +1362,25 @@ void Store_Config(void)
 	}
 }
 
-void Read_Battery(uint8_t send)
+int Read_Battery(uint8_t send)
 {
+	const uint16_t adc2volts[] =
+	{0, 2, 5, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31, 33, 35, 38, 40, 42, 45, 47, 49, 52, 54, 57, 59, 61,
+	64, 66, 68, 71, 73, 75, 78, 80, 82, 85, 87, 90, 92, 94, 97, 99, 101, 104, 106, 108, 111, 113, 115, 118,
+	120, 123, 125, 127, 130, 132, 134, 137, 139, 141, 144, 146, 148, 151, 153, 156, 158, 160, 163, 165, 167,
+	170, 172, 174, 177, 179, 181, 184, 186, 189, 191, 193, 196, 198, 200, 203, 205, 207, 210, 212, 214, 217,
+	219, 222, 224, 226, 229, 231, 233, 236, 238, 240, 243, 245, 247, 250, 252, 255, 257, 259, 262, 264, 266,
+	269, 271, 273, 276, 278, 280, 283, 285, 288, 290, 292, 295, 297, 299, 302, 304, 306, 309, 311, 313, 316,
+	318, 321, 323, 325, 328, 330, 332, 335, 337, 339, 342, 344, 346, 349, 351, 354, 356, 358, 361, 363, 365,
+	368, 370, 372, 375, 377, 379, 382, 384, 386, 389, 391, 394, 396, 398, 401, 403, 405, 408, 410, 412, 415,
+	417, 419, 422, 424, 427, 429, 431, 434, 436, 438, 441, 443, 445, 448, 450, 452, 455, 457, 460, 462, 464,
+	467, 469, 471, 474, 476, 478, 481, 483, 485, 488, 490, 493, 495, 497, 500, 502, 504, 507, 509, 511, 514,
+	516, 518, 521, 523, 526, 528, 530, 533, 535, 537, 540, 542, 544, 547, 549, 551, 554, 556, 559, 561, 563,
+	566, 568, 570, 573, 575, 577, 580, 582, 584, 587, 589, 592, 594, 596, 599, 601};
+
 	uint32_t adc_value = 0x55;
 	uint8_t alert[] = {0x02, 0x00};
+	int volts;
 	MX_ADC_Init();
 	HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_SET);
 	Delay_ms(100);
@@ -1357,7 +1389,7 @@ void Read_Battery(uint8_t send)
 		DEBUG_TX("ADC start error\r\n\0");
 		HAL_ADC_DeInit(&hadc);
 		HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
-		return;
+		return 0;
 	}
 	if(HAL_ADC_PollForConversion(&hadc, 50) != HAL_OK)
 	{
@@ -1372,7 +1404,8 @@ void Read_Battery(uint8_t send)
 		HAL_ADC_Stop(&hadc);
 		HAL_ADC_DeInit(&hadc);
 		HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_RESET);
-		sprintf(debug_buff, "ADC battery value: %x\r\n", (int)adc_value);
+		volts = adc2volts[adc_value >> 8];
+		sprintf(debug_buff, "ADC battery value: %x, volts %d.%d\r\n", (int)adc_value, (int)(volts/100), volts%100);
 		DEBUG_TX(debug_buff);
 		if(send)
 		{
@@ -1382,7 +1415,7 @@ void Read_Battery(uint8_t send)
 			Send_Message(f_alert, 2, alert, 1, 0);
 		}
 	}
-	return;
+	return volts;
 }
 
 
@@ -1521,14 +1554,85 @@ void On_RTC_IRQ(void)
 	}
 }
 
+void Configure_And_Test(void)
+{
+	int voltage = 0;
+	uint8_t network_found = 0;
+
+	voltage = Read_Battery(0);
+	Radio_On(1);
+	RADIO_TXS("ER_CMD#R0", 9);
+	status = Rx_Message(Rx_Buffer, &length, 3000);
+	DEBUG_TX("Received: ");
+	DEBUG_TXS(Rx_Buffer, 9);
+	DEBUG_TX("\r\n\0");
+	Delay_ms(100);
+	RADIO_TXS("ACK", 3);
+	Delay_ms(200);
+
+	// Set OTA data rate to 1200 bps
+	RADIO_TXS("ER_CMD#B0", 9);
+	status = Rx_Message(Rx_Buffer, &length, 3000);
+	sprintf(debug_buff, "Received %.*s\r\n", length, Rx_Buffer);
+	DEBUG_TX(debug_buff);
+	Delay_ms(100);
+	RADIO_TXS("ACK", 3);
+	Delay_ms(200);
+
+	RADIO_TXS("Hello World", 11);
+	DEBUG_TX("Sent Hello World\r\n\0");
+	Delay_ms(50);
+	status = Rx_Message(Rx_Buffer, &length, 7000);
+	if (status == HAL_OK)
+	{
+		network_found = 1;
+		sprintf(debug_buff, "Received %.*s\r\n", length, Rx_Buffer);
+		DEBUG_TX(debug_buff);
+		// Get RSSI
+		RADIO_TXS("ER_CMD#T8", 9);
+		status = Rx_Message(Rx_Buffer, &length, 3000);
+		sprintf(debug_buff, "RSSI echo: %.*s\r\n", length, Rx_Buffer);
+		DEBUG_TX(debug_buff);
+		Delay_ms(100);
+		RADIO_TXS("ACK", 3);
+		status = Rx_Message(Rx_Buffer, &length, 3000);
+		sprintf(debug_buff, "RSSI: %.*s\r\n", length, Rx_Buffer);
+		DEBUG_TX(debug_buff);
+	}
+	else
+		DEBUG_TX("Receive problem\r\n\0");
+	Radio_Off();
+	sprintf(debug_buff, "Battery voltage: %d.%d\r\n", (int)(voltage/100), voltage%100);
+	DEBUG_TX(debug_buff);
+	sprintf(screens[16][0], "F\x02Y\x04G\x13Node ID: %010d", (int)node_id_int);
+	screens[16][0][4] = 0x43;  // C
+	sprintf(screens[16][0]+26, "Y\x1AG\x15Gattery voltage: %d.%d", (int)(voltage/100), voltage%100);
+	screens[16][0][28] = 0x43;  // C
+	screens[16][0][30] = 0x42;  // B
+	if(network_found)
+	{
+	  	sprintf(screens[16][0]+52, "Y\x30G\x0DRSSI: %7s", Rx_Buffer);
+	  	screens[16][0][54] = 0x43;  // C
+	}
+	else
+	{
+	  	sprintf(screens[16][0]+52, "Y\x30G\x0D No network  ");
+	  	screens[16][0][54] = 0x43;  // C
+	}
+	sprintf(screens[16][0]+70, "Y\x46G\x15Push here to continue");
+	screens[16][0][72] = 0x43;  // C
+	Set_Display(STATE_TEST);
+}
+
 void Initialise_States(void)
 {
     //                               S   D    A   LD    LS   MS  MD   RS   RD   XV   XS    W   WS
+	static const uint8_t test[16] = {16, 16, 255,   0,   0,   0,   0,   0,   0, 255,  0, 255, 255}; // Test
 	static const uint8_t init[16] = {19, 19, 255,  20, 255, 255,  20, 255,  20, 255, 255, 255, 255}; // Push to Connect
 	static const uint8_t conn[16] = {20, 20, 255, 255, 255, 255, 255, 255, 255,   2,  21, 255, 255}; // Connecting
 	static const uint8_t conf[16] = {21, 21, 255,  19,  19,  19,  19,  19,  19,  13,   0, 255, 255}; // Configuring
-	static const uint8_t strt[16] = {22, 22, 255,   1, 255, 255,   1, 255,   1,  13,   0, 255, 255}; // Double-push to start
-	static const uint8_t prob[16] = {23, 23, 255,  19, 255, 255,  19, 255,  19,  255,  0, 255, 255}; // Comms Problem
+	static const uint8_t strt[16] = {22, 22, 255,   0, 255, 255,   0, 255,   0,  13,   0, 255, 255}; // Double-push to start
+	static const uint8_t prob[16] = {23, 23, 255,  22, 255, 255,  19, 255,  22,  255,  0, 255, 255}; // Comms Problem
 	memcpy(states[STATE_INITIAL], init, sizeof(init));
 	memcpy(states[STATE_CONNECTING], conn, sizeof(conn));
 	memcpy(states[STATE_CONFIG], conf, sizeof(conf));
