@@ -66,7 +66,7 @@
 #define ACK_SEARCH_TIME         2    // Units: 1 second
 #define ONE_DAY 				(24*60*60)
 #define T_LONG_PRESS          	2    // Units: 1 second
-#define T_DOUBLE_PRESS_16		12   // Units: 1/16 second
+#define T_DOUBLE_PRESS_16		8    // Units: 1/16 second
 #define T_RESET_PRESS         	8    // Units: 1 second
 #define T_MAX_RESET_PRESS		20   // To catch failure case
 
@@ -141,6 +141,7 @@ uint8_t 			grant_address[] 		= {0xBB, 0x00};
 
 int 				radio_ready   			= SET;
 int 				screen_num 				= 0;
+GPIO_PinState 		button_state;
 int					side					= 0;
 uint8_t 			button_irq				= 0;
 RTC_HandleTypeDef 	hrtc;
@@ -152,11 +153,10 @@ uint8_t 			current_screen 			= 0;
 uint8_t 			rtc_irq					= 0;
 uint16_t 			pressed_button;
 uint8_t 			running 				= 0;
-GPIO_PinState  		button_state;
 uint8_t				current_state			= STATE_INITIAL_TEST;
 int32_t				button_press_time[2] 	= {-100, -100};
 uint32_t			last_press_sixteenths[2] = {0, 0};
-uint8_t				check_long[2]    = {0, 0};
+uint8_t				check_long[2]   		= {0, 0};
 uint8_t				stop_mode				= 1;
 uint8_t				start_from_reset		= 1;
 
@@ -204,8 +204,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  int  i;
-
+  GPIO_PinState gpio_test;
   /* USER CODE END 1 */
 
   /* MCU Configuration----------------------------------------------------------*/
@@ -268,7 +267,6 @@ int main(void)
 	  DEBUG_TX(debug_buff);
   }
   */
-
   Load_Normal_Screens();
   Initialise_States();
   ecog_init();
@@ -290,13 +288,21 @@ int main(void)
 	  PLL as system clock source (HSE and PLL are disabled in STOP mode) */
 	  if(stop_mode)
 	  {
+		  //SysTick->CTRL  |= SysTick_CTRL_TICKINT_Msk;            // systick IRQ on
 		  SYSCLKConfig_STOP();
 		  HAL_UART_MspInit(&huart1);
-		  DEBUG_TX("*** Main loop ***\r\n\0 ");
+		  DEBUG_TX("*** Main ***\r\n\0");
 	  }
 	  if(button_irq)
 	  {
+		  HAL_NVIC_DisableIRQ(EXTI3_IRQn);
+		  HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
+		  Delay_ms(20);
+		  button_state = HAL_GPIO_ReadPin(GPIOA, pressed_button);
+		  sprintf(debug_buff, "Button IRQ: state: %d\r\n", button_state);
+		  DEBUG_TX(debug_buff);
 		  On_Button_IRQ(BUTTON_PRESSED, pressed_button, button_state);
+		  Enable_IRQ();
 		  button_irq = 0;
 	  }
 	  else if(rtc_irq)
@@ -326,9 +332,12 @@ int main(void)
 		  Radio_Off();
 		  for(side=0; side<2; side++)
 			  last_press_sixteenths[side] = 0;
+		  button_irq = 0;  // Seemed to be missed above
 		  DEBUG_TX("Stopping\r\n\0");
+		  //Delay_ms(20);
 		  HAL_UART_MspDeInit(&huart1);
 		  //HAL_PWR_EnterSTANDBYMode();
+		  //SysTick->CTRL  &= ~SysTick_CTRL_TICKINT_Msk;        // systick IRQ off
 		  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
 	  }
   }
@@ -605,6 +614,7 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 	uint32_t 			pressed_time 			= 0;
 	uint32_t 			now;
 	static uint8_t		check_double[2]			= {0, 0};
+	static uint8_t		double_press			= 0;
 
 	if (GPIO_Pin == PUSH_RIGHT_Pin)
 		side = RIGHT_SIDE;
@@ -621,28 +631,14 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 	//sprintf(debug_buff, "side: %d, doub: %d:%d, long: %d:%d, state: %d, pressed: %d\r\n",
 	//		side, check_double[0], check_double[1], check_long[0], check_long[1],
 	//		button_state, button_pressed);
-	DEBUG_TX(debug_buff);
+	//DEBUG_TX(debug_buff);
 	if(button_pressed && (button_state == GPIO_PIN_RESET))
 	{
-		check_long[side] = 0;  // Because we need to go through !button_pressed on the way to checking for longs
+		check_long[0] = 0;  check_long[1] = 0; // Because we need to go through !button_pressed on the way to checking for longs
 		if(check_double[side])
 		{
 			check_double[0] = 0; check_double[1] = 0;
-			/*
-			if((last_press_sixteenths[side] != 0) && ((SIXTEENTHS_NOW - last_press_sixteenths[side]) < T_DOUBLE_PRESS_16))
-			{
-				stop_mode = 1;
-				if(side == LEFT_SIDE) DEBUG_TX("AL\r\n\0"); else DEBUG_TX("AR\r\n\0");
-				if(side == LEFT_SIDE)
-					return PRESS_LEFT_DOUBLE;
-				else
-					return PRESS_RIGHT_DOUBLE;
-			}
-			else
-				if(side == LEFT_SIDE) DEBUG_TX("AAL\r\n\0"); else DEBUG_TX("AAR\r\n\0");
-	   			stop_mode = 0;
-				return PRESS_NONE;
-			*/
+			double_press = 1;
 			stop_mode = 1;
 			if(side == LEFT_SIDE) DEBUG_TX("AL\r\n\0"); else DEBUG_TX("AR\r\n\0");
 			if(side == LEFT_SIDE)
@@ -657,6 +653,7 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 	   			Radio_On(0);  // Radio needs about 400 ms to turn on, so start now.
 	   		else
 	   			Radio_Off();
+	   		double_press = 0;
 	   		stop_mode = 0;
 	   		if(side == LEFT_SIDE) DEBUG_TX("BL\r\n\0"); else DEBUG_TX("BR\r\n\0");
 	   		return PRESS_NONE;
@@ -664,10 +661,11 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 	}
 	else if(!button_pressed)
 	{
-  		button_press_time[side] = now;  // Put these here to prevent false longs if set is missed
-   		check_long[side] = 1;    // Put these here to prevent false longs if set is missed
+  		button_press_time[side] = now;
+   		check_long[side] = 1;   // Need to go through here when checking long
 		check_double[0] = 0; check_double[1] = 0;
 		last_press_sixteenths[side] = SIXTEENTHS_NOW;
+		double_press = 0;
 		stop_mode = 1;
    		if(side == LEFT_SIDE) DEBUG_TX("CL\r\n\0"); else DEBUG_TX("CR\r\n\0");
 		if(side == LEFT_SIDE)
@@ -709,8 +707,11 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 		{
 	   		if(side == LEFT_SIDE) DEBUG_TX("FL\r\n\0"); else DEBUG_TX("FR\r\n\0");
 			check_long[0] = 0; check_long[1] = 0;  // To reset the "other side"
-	   		check_double[side] = 1;
-			stop_mode = 0;
+			if(!double_press)
+			{
+				check_double[side] = 1;
+				stop_mode = 0;
+			}
 			return PRESS_NONE;
 		}
 	}
@@ -719,7 +720,7 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 		// Should not ever get here, but just in case
 		stop_mode = 1;
 		//DEBUG_TX("G\r\n\0");
-		sprintf(debug_buff, "G sideL %d, doub: %d:%d, long: %d:%d, state: %d, pressed: %d\r\n",
+		sprintf(debug_buff, "G side: %d, doub: %d:%d, long: %d:%d, state: %d, pressed: %d\r\n",
 				side, check_double[0], check_double[1], check_long[0], check_long[1],
 				button_state, button_pressed);
 		DEBUG_TX(debug_buff);
@@ -730,10 +731,14 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-	pressed_button = GPIO_Pin;
-	button_state = HAL_GPIO_ReadPin(GPIOA, GPIO_Pin);
-	//button_state = __HAL_GPIO_EXTI_GET_IT(GPIO_Pin);
+	uint32_t c = 1000;
 	button_irq = 1;
+	pressed_button = GPIO_Pin;
+	while (HAL_NVIC_GetPendingIRQ(GPIO_Pin) && c--)
+	{
+		__HAL_GPIO_EXTI_CLEAR_IT(GPIO_Pin);
+		HAL_NVIC_ClearPendingIRQ(GPIO_Pin);
+	}
 	return;
 }
 

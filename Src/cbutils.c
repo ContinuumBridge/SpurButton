@@ -16,7 +16,7 @@
 #include "rtc.h"
 #include "cbutils.h"
 
-extern char debug_buff[64];
+extern char debug_buff[128];
 
 /* Code */
 
@@ -190,21 +190,23 @@ void HMS(uint32_t e, uint8_t *h, uint8_t *m, uint8_t *s)
 
 void Enable_IRQ(void)
 {
-	uint32_t c = 1000;  // In case something has gone wrong
-	DEBUG_TX("Enable_IRQ\r\n");
+	//uint32_t c = 1000;  // In case something has gone wrong
+	DEBUG_TXS("Enable_IRQ\r\n", 12);
 	// This is the recommended way of clearing IRQs
-	while (HAL_NVIC_GetPendingIRQ(EXTI15_10_IRQn) && c--)
-	{
-		__HAL_GPIO_EXTI_CLEAR_IT(EXTI15_10_IRQn);
-		HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
-	}
+	//while (HAL_NVIC_GetPendingIRQ(EXTI15_10_IRQn) && c--)
+	//{
+	//	__HAL_GPIO_EXTI_CLEAR_IT(EXTI15_10_IRQn);
+	//	HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
+	//}
+	//HAL_NVIC_SetPriority(EXTI15_10_IRQn, 3, 0);
 	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-	c = 1000;
-	while (HAL_NVIC_GetPendingIRQ(EXTI3_IRQn) && c--)
-	{
-		__HAL_GPIO_EXTI_CLEAR_IT(EXTI3_IRQn);
-		HAL_NVIC_ClearPendingIRQ(EXTI3_IRQn);
-	}
+	//c = 1000;
+	//while (HAL_NVIC_GetPendingIRQ(EXTI3_IRQn) && c--)
+	//{
+	//	__HAL_GPIO_EXTI_CLEAR_IT(EXTI3_IRQn);
+	//	HAL_NVIC_ClearPendingIRQ(EXTI3_IRQn);
+	//}
+	//HAL_NVIC_SetPriority(EXTI3_IRQn, 3, 0);
 	HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 	return;
 }
