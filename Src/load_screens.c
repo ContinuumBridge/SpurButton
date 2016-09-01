@@ -28,7 +28,7 @@ void Load_Normal_Screens(void)
 		              	  "C\x08" "response\xFF" "ES");
 	sprintf(screens[19][0], "F\x02Y\x04G\x13Node ID: %010d", node_id_int);
 	screens[19][0][4] = 0x43;  // C
-	strcpy(screens[19][0] + 26, "Y\x1A" "C\x19" "Log onto portal.spur.site\xFF"
+	strcpy(screens[19][0] + 26, "Y\x1A" "C\x1A" "Sign into portal.spur.site\xFF"
 			              "Y\x30" "C\x17" "Enter Node ID then push\xFF" "Y\x46" "C\x1A" "here for 3 secs to connect\xFF" "ES");
 	//strcpy(debug_buff, screens[19][0]);
 	//DEBUG_TX(debug_buff);

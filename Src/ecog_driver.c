@@ -784,16 +784,19 @@ uint8_t ecog_write_screen_data(void)
 {
   uint8_t f;                                                                            /* General loop counter */
   uint8_t y;                                                                            /* Y loop counter */
+  uint8_t multiple = 4;
   //uint8_t buffer[25];                                                                   /* 1 scan line data */
   //uint8_t * bp;                                                                         /* Buffer pointer */
 
-  for(f=0; f<1; f++)                                                                    /* Default is 4 */
+  //for(f=0; f<1; f++)                                                                    /* Default is 4 */
+  for(f=0; f<multiple; f++)                                                                    /* Default is 4 */
 	  for(y=0;y<96;y++)                                                                 /* Loop for all Y data */
 	  {
 		  ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_BLACK);                    /* Scan line of data */
 	  }
   //timers_sdelay(150);  // PCX added
-  for(f=0; f<2; f++)                                                                    /* Default is 4 */
+  //for(f=0; f<2; f++)                                                                    /* Default is 4 */
+  for(f=0; f<multiple; f++)                                                                    /* Default is 4 */
 	  for(y=0;y<96;y++)                                                                 /* Loop for all Y data */
 	  {
 		  ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_WHITE);                    /* Scan line of data */
@@ -802,13 +805,22 @@ uint8_t ecog_write_screen_data(void)
   ecog_write_inverse(1);
 
   //for(f=0; f<6; f++)   // "Low temp"
-  for(f=0; f<6; f++)   // "Test temp" Default is 12
+  for(f=0; f<multiple; f++)   // "Test temp" Default is 12
 	  for(y=0;y<96;y++)                                                                 /* Loop for all Y data */
 	  {
 		  ecog_send_scan_line(y,&ecog_buffer[y*25],LINE_TYPE_NORMAL);                    /* Scan line of data */
 	  }
 }
 
+void ecog_blank_screen(int line_type)
+{
+	uint8_t f;                                                                            /* General loop counter */
+	uint8_t y;                                                                            /* Y loop counter */
+	for(y=0;y<96;y++)                                                                 	  /* Loop for all Y data */
+	{
+		ecog_send_scan_line(y,&ecog_buffer[y*25],line_type);                              /* Scan line of data */
+	}
+}
 
 /*************************************************************
  ecog_block_type -   Write block type screen data to display
@@ -961,8 +973,9 @@ uint8_t ecog_write_border(void)
  Outputs:                      Nothing
  Date:                         03/11/15
  ****************************************************/
-uint8_t ecog_discharge_capacitors(void)
+void ecog_discharge_capacitors(void)
 {
+  int discharge_time = 150;
   ecog_write(0x0b,0x00);
   ecog_write(0x03,0x01);                                                                /* Latch reset turn on */
   ecog_write(0x05,0x03);                                                                /* Power off chargepump */
@@ -970,6 +983,7 @@ uint8_t ecog_discharge_capacitors(void)
 //  io_output(O_BORDER_CONTROL,0);
   // PCX Was 1000
   timers_sdelay(300);                                                                  /* Delay to allow discharge */
+  //timers_sdelay(1000);                                                                  /* Delay to allow discharge */
 //  io_output(O_BORDER_CONTROL,1);
   ecog_write(0x04,0x80);                                                                /* Discharge internal */
   ecog_write(0x05,0x00);                                                                /* Turn off all chargepumps */
@@ -979,7 +993,8 @@ uint8_t ecog_discharge_capacitors(void)
 
   // PCX Moved here
   ECOG_POWER_OFF;                                                                       /* Power off display */
-  timers_sdelay(10);                                                                    /* Delay 50ms */
+  //timers_sdelay(10);                                                                    /* Delay 50ms */
+  timers_sdelay(50);                                                                    /* Delay 50ms */
   // PCX
   //spi_deinit();                                                                         /* Deinitialise SPI was here*/
   // PCX
@@ -999,8 +1014,16 @@ uint8_t ecog_discharge_capacitors(void)
   ECOG_RESET_ON;                                                                        /* Reset line low */
   ECOG_CS_ON;                                                                           /* Select device */
   ECOG_DISCHARGE_ON;                                                                    /* Discharge display */
-  //timers_sdelay(150);                                                                   /* Delay 150ms */
-  timers_sdelay(300);                                                                   /* Delay 150ms */
+  if(temperature > 25)
+	  discharge_time = 10;
+  else if(temperature > 15)
+	  discharge_time = 200;
+  else
+	  discharge_time = 400;
+  discharge_time = 200;
+  sprintf(debug_buff, "Discharge: %d\r\n", discharge_time);
+  DEBUG_TX(debug_buff);
+  timers_sdelay(discharge_time);                                                        /* Delay 150ms */
   ECOG_DISCHARGE_OFF;                                                                   /* Discharge off */
 }
 

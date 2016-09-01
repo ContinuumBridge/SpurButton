@@ -36,11 +36,9 @@
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
 //#define CB_DEMO_0
-//#define FONT_2 					Arial_Rounded_MT_Bold19x20
-//#define FONT_2 						Arial_Narrow16x23
+#define VERSION					1
 #define FONT_2 					Arial_Narrow14x20
-//#define FONT_2 Arial_Narrow16x20
-//#define FONT_3 					Arial_Rounded_MT_Bold26x27
+//#define FONT_2 					Arial_Unicode_MS17x20
 #define FONT_3 					Arial_Narrow18x26
 
 #define STATE_TEST				16
@@ -61,9 +59,9 @@
 #define SEARCH_ERROR 			2
 #define SEND_OK 				0
 #define SEND_TIMEOUT 			1
-#define BEACON_SEARCH_TIME 		10   // Units: 1 second
-#define FIRST_ACK_SEARCH_TIME   1    // Units: 1 second
-#define ACK_SEARCH_TIME         2    // Units: 1 second
+#define BEACON_SEARCH_TIME 		160  // Units: 1/16 second
+#define FIRST_ACK_SEARCH_TIME   16   // Units: 1/16 second
+#define ACK_SEARCH_TIME         24   // Units: 1/16 secon
 #define ONE_DAY 				(24*60*60)
 #define T_LONG_PRESS          	2    // Units: 1 second
 #define T_DOUBLE_PRESS_16		8    // Units: 1/16 second
@@ -86,9 +84,6 @@
 #define  f_beacon             	0x0A
 #define  f_start             	0x0B
 #define	 f_unknown				0x0C
-
-#define RIGHT_SIDE			  	0
-#define LEFT_SIDE			  	1
 
 #define PRESS_LEFT_SINGLE	  	0
 #define PRESS_RIGHT_SINGLE    	1
@@ -159,6 +154,10 @@ uint32_t			last_press_sixteenths[2] = {0, 0};
 uint8_t				check_long[2]   		= {0, 0};
 uint8_t				stop_mode				= 1;
 uint8_t				start_from_reset		= 1;
+uint8_t				display_initialised		= 0;
+int8_t 				temperature;
+int8_t 				rssi;
+uint8_t				using_side				= BOTH_SIDES;
 
 typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
@@ -172,14 +171,14 @@ HAL_StatusTypeDef Rx_Message(uint8_t *buffer, int *length, uint16_t timeout);
 void Radio_On(int delay);
 void Host_Ready(void);
 void Radio_Off(void);
-uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, uint16_t max_search_time);
+uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, int *length, uint16_t max_search_time);
 void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t ack, uint8_t beacon);
 void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function);
 void Network_Include(void);
 void Listen_Radio(uint8_t reset_fail_count);
 void Set_Wakeup(uint8_t force_awake);
 void Build_Screen(uint8_t screen_num);
-void Store_Config(void);
+void Store_Config(int length);
 static void SYSCLKConfig_STOP(void);
 static void SystemPower_Config(void);
 void Send_Delay(void);
@@ -189,7 +188,9 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 void Initialise_States(void);
 void On_NewState(void);
 int Read_Battery(uint8_t send);
+int Get_RSSI(void);
 void Configure_And_Test(void);
+int8_t Get_Temperature(void);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -204,7 +205,9 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  GPIO_PinState gpio_test;
+  uint8_t tx_data[6];
+  int i;
+
   /* USER CODE END 1 */
 
   /* MCU Configuration----------------------------------------------------------*/
@@ -274,6 +277,11 @@ int main(void)
   // Reset radio
   Configure_And_Test();
   Radio_Off();
+  for(i=0; i<4; i++)
+	  tx_data[i] = node_id[i];
+  tx_data[4] = temperature; tx_data[5] = rssi;
+  sprintf(debug_buff,"RSSI to send: %d %d %d %d %d %d\r\n", (int)tx_data[0], (int)tx_data[1], (int)tx_data[2], (int)tx_data[3], (int)tx_data[4], (int)tx_data[5]);
+  DEBUG_TX(debug_buff);
   DEBUG_TX("Waiting\r\n\0");
   HAL_UART_MspDeInit(&huart1);
   HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
@@ -302,7 +310,7 @@ int main(void)
 		  sprintf(debug_buff, "Button IRQ: state: %d\r\n", button_state);
 		  DEBUG_TX(debug_buff);
 		  On_Button_IRQ(BUTTON_PRESSED, pressed_button, button_state);
-		  Enable_IRQ();
+		  Enable_IRQ(using_side);
 		  button_irq = 0;
 	  }
 	  else if(rtc_irq)
@@ -329,12 +337,13 @@ int main(void)
 	  }
 	  if(stop_mode)
 	  {
-		  Radio_Off();
 		  for(side=0; side<2; side++)
 			  last_press_sixteenths[side] = 0;
+		  Enable_IRQ(using_side);
 		  button_irq = 0;  // Seemed to be missed above
 		  DEBUG_TX("Stopping\r\n\0");
-		  //Delay_ms(20);
+		  Radio_Off();
+		  Delay_ms(20);
 		  HAL_UART_MspDeInit(&huart1);
 		  //HAL_PWR_EnterSTANDBYMode();
 		  //SysTick->CTRL  &= ~SysTick_CTRL_TICKINT_Msk;        // systick IRQ off
@@ -464,13 +473,14 @@ static void SystemPower_Config(void)
 
 void Set_Display(uint8_t screen_num)
 {
-	if (ecog_write_inverse(0))
-	{
-		ecog_cls();
-		Build_Screen(screen_num);
-		ecog_update_display(1);
-		current_screen = screen_num;
-	}
+	DEBUG_TX("Set_Display\r\n\0");
+	if(!display_initialised)
+		ecog_write_inverse(0);
+	display_initialised = 0;
+	ecog_cls();
+	Build_Screen(screen_num);
+	ecog_update_display(1);
+	current_screen = screen_num;
 }
 
 void Build_Screen(uint8_t screen_num)
@@ -491,13 +501,13 @@ void Build_Screen(uint8_t screen_num)
 		if(strncmp(screens[screen_num][region]+pos, "S", 1) == 0)
 		{
 			pos += 2;
-			//DEBUG_TX("Screen\r\n");
+			//DEBUG_TX("Screen\r\n\0");
 
 		}
 		else if(strncmp(screens[screen_num][region]+pos, "R", 1) == 0)
 		{
 			pos += 2;
-			//DEBUG_TX("Region\r\n");
+			//DEBUG_TX("Region\r\n\0");
 		}
 		else if(strncmp(screens[screen_num][region]+pos, "F", 1) == 0)
 		{
@@ -517,7 +527,7 @@ void Build_Screen(uint8_t screen_num)
 		else if(strncmp(screens[screen_num][region]+pos, "X", 1) == 0)
 		{
 			pos++; x = screens[screen_num][region][pos]; pos++;
-			//sprintf(debug_buff,"Build_Screen, x: %d                             \r\n", x);
+			//sprintf(debug_buff,"Build_Screen, x: %d\r\n", x);
 			//DEBUG_TX(debug_buff);
 		}
 		else if(strncmp(screens[screen_num][region]+pos, "Y", 1) == 0)
@@ -541,6 +551,10 @@ void Build_Screen(uint8_t screen_num)
 			//DEBUG_TX(debug_buff);
 			ecog_printfc(font, y, screens[screen_num][region] + pos);
 			//sprintf(debug_buff,"Build_Screen, text: %20s\r\n", screens[screen_num][region] + pos);
+			//DEBUG_TX(debug_buff);
+			//sprintf(debug_buff,"Build_Screen, ords: %d %d %d %d\r\n", (char)*(screens[screen_num][region] + pos),
+			//		(char)*(screens[screen_num][region] + pos+1), (char)*(screens[screen_num][region] + pos+2),
+			//		(char)*(screens[screen_num][region] + pos+3));
 			//DEBUG_TX(debug_buff);
 			pos += len + 1;
 			//sprintf(debug_buff,"Build_Screen, pos: %d, next 3 chars: %3s\r\n", pos, screens[screen_num][region] + pos);
@@ -585,25 +599,25 @@ void Build_Screen(uint8_t screen_num)
 		}
 		else if(strncmp(screens[screen_num][region]+pos, "E", 1) == 0)
 		{
-			//DEBUG_TX("Build_Screen found E\r\n");
+			//DEBUG_TX("Build_Screen found E\r\n\0");
 			pos++;
 			if(strncmp(screens[screen_num][region]+pos, "R", 1) == 0)
 			{
 				pos++; region++;
 				loops = 0;
-				//DEBUG_TX("Build_Screen end region\r\n");
+				//DEBUG_TX("Build_Screen end region\r\n\0");
 			}
 			else if(strncmp(screens[screen_num][region]+pos, "S", 1) == 0)
 			{
 				parsing = 0;
-				//DEBUG_TX("Build_Screen end screen\r\n");
+				//DEBUG_TX("Build_Screen end screen\r\n\0");
 			}
         }
 		loops++;
 		if(loops >127)
 		{
 			parsing = 0;
-			//DEBUG_TX("Build_Screen did not find end of screen\r\n");
+			//DEBUG_TX("Build_Screen did not find end of screen\r\n\0");
 		}
 	}
 }
@@ -617,9 +631,17 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 	static uint8_t		double_press			= 0;
 
 	if (GPIO_Pin == PUSH_RIGHT_Pin)
+	{
 		side = RIGHT_SIDE;
+		if(using_side == BOTH_SIDES)
+			using_side = RIGHT_SIDE;
+	}
 	else if (GPIO_Pin == LEFT_PUSH_Pin)
+	{
 		side = LEFT_SIDE;
+		if(using_side == BOTH_SIDES)
+			using_side = LEFT_SIDE;
+	}
 	else
 		return PRESS_NONE;
 
@@ -634,11 +656,11 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 	//DEBUG_TX(debug_buff);
 	if(button_pressed && (button_state == GPIO_PIN_RESET))
 	{
-		check_long[0] = 0;  check_long[1] = 0; // Because we need to go through !button_pressed on the way to checking for longs
 		if(check_double[side])
 		{
 			check_double[0] = 0; check_double[1] = 0;
 			double_press = 1;
+			using_side = BOTH_SIDES;
 			stop_mode = 1;
 			if(side == LEFT_SIDE) DEBUG_TX("AL\r\n\0"); else DEBUG_TX("AR\r\n\0");
 			if(side == LEFT_SIDE)
@@ -648,6 +670,7 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 		}
 	   	else
 	   	{
+			check_long[side] = 0;
 	   		last_press_sixteenths[side] = SIXTEENTHS_NOW;
 	   		if(current_state != STATE_DEMO)
 	   			Radio_On(0);  // Radio needs about 400 ms to turn on, so start now.
@@ -667,6 +690,7 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 		last_press_sixteenths[side] = SIXTEENTHS_NOW;
 		double_press = 0;
 		stop_mode = 1;
+		using_side = BOTH_SIDES;
    		if(side == LEFT_SIDE) DEBUG_TX("CL\r\n\0"); else DEBUG_TX("CR\r\n\0");
 		if(side == LEFT_SIDE)
 			return PRESS_LEFT_SINGLE;
@@ -690,6 +714,7 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 			else if((pressed_time > T_LONG_PRESS) && (pressed_time < T_MAX_RESET_PRESS))
 			{
 				stop_mode = 1;
+				using_side = BOTH_SIDES;
 		   		if(side == LEFT_SIDE) DEBUG_TX("DL\r\n\0"); else DEBUG_TX("DR\r\n\0");
 				if(side == LEFT_SIDE)
 					return PRESS_LEFT_LONG;
@@ -775,6 +800,8 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 		else if(button_press == PRESS_LEFT_DOUBLE)
 		{
 			wait_demo = 1;
+			stop_mode = 1;
+			Delay_ms(1000);
 			return;
 		}
 		else if((button_press == PRESS_RIGHT_DOUBLE))
@@ -789,10 +816,17 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 				current_state = STATE_DEMO;
 				return;
 			}
+			else
+			{
+				stop_mode = 1;
+				Delay_ms(1000);
+			}
 		}
 		else
 		{
 			wait_demo = 0;
+			Set_Display(current_state);
+			stop_mode = 1;
 			return;
 		}
 	}
@@ -852,12 +886,11 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 		}
 		if(current_state != old_state)
 			On_NewState();
-		else
-			ecog_discharge_capacitors();
-		if(!changed)
+		else if(!changed)
 		{
-			stop_mode = 1;
 		    DEBUG_TX("Press not used in this state\r\n\0");
+			Set_Display(current_state);
+			stop_mode = 1;
 		}
 	}
 }
@@ -865,13 +898,23 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 void On_NewState(void)
 {
 	uint8_t alert_id[] = {0x00, 0x00};
-	sprintf(debug_buff, "On_NewState, state: %d\r\n\0", current_state);
+	sprintf(debug_buff, "On_NewState, state: %d\r\n", current_state);
 	DEBUG_TX(debug_buff);
+	if(!display_initialised)
+	{
+		if (ecog_write_inverse(0))
+		{
+			ecog_blank_screen(LINE_TYPE_WHITE);
+			display_initialised = 1;
+		}
+		else
+			DEBUG_TX("Problem writing inverse\r\n\0");
+	}
 	if(states[current_state][S_A] != 0xFF)
 	{
 		Host_Ready();
 		alert_id[1] = states[current_state][S_A]; alert_id[0] = 0x00;
-		sprintf(debug_buff, "Sending alert: %x %x\r\n\0", alert_id[0], alert_id[1]);
+		sprintf(debug_buff, "Sending alert: %x %x\r\n", alert_id[0], alert_id[1]);
 		DEBUG_TX(debug_buff);
 		Send_Message(f_alert, 2, alert_id, 1, 0);
 	}
@@ -909,7 +952,10 @@ void Power_Down(void)
 void Network_Include(void)
 {
 	uint8_t equal = 1;
+	uint8_t tx_data[6];
+	int length;
 	int i;
+
 	DEBUG_TX("Network_Include\r\n\0");
 	if(include_state == 0)
 	{
@@ -923,10 +969,21 @@ void Network_Include(void)
 	else if(include_state == 2)
 		include_state = 3;
 	Radio_On(1);
-	if(Message_Search(beacon_address, Rx_Buffer, BEACON_SEARCH_TIME) == SEARCH_OK)
+	if(Message_Search(beacon_address, Rx_Buffer, &length, BEACON_SEARCH_TIME) == SEARCH_OK)
 	{
+
+		sprintf(debug_buff, "Received %x %x %x %x %x %x\r\n", Rx_Buffer[0], Rx_Buffer[1], Rx_Buffer[2], Rx_Buffer[3],
+				Rx_Buffer[4], Rx_Buffer[5]);
+		DEBUG_TX(debug_buff);
 		bridge_address[0] = Rx_Buffer[2]; bridge_address[1] = Rx_Buffer[3];
-		Send_Message(f_include_req, 4, node_id, 0, 0);
+		temperature = Get_Temperature();
+		rssi = Get_RSSI();
+		for(i=0; i<4; i++)
+			tx_data[i] = node_id[i];
+		tx_data[4] = VERSION; tx_data[5] = rssi;
+		sprintf(debug_buff,"include_req data: %d %d %d %d %d %d\r\n", (int)tx_data[0], (int)tx_data[1], (int)tx_data[2], (int)tx_data[3], (int)tx_data[4], (int)tx_data[5]);
+		DEBUG_TX(debug_buff);
+		Send_Message(f_include_req, 6, tx_data, 0, 0);
 	}
 	else
 	{
@@ -951,7 +1008,7 @@ void Network_Include(void)
 		}
 		return;
 	}
-	if(Message_Search(grant_address, Rx_Buffer, BEACON_SEARCH_TIME) == SEARCH_OK)
+	if(Message_Search(grant_address, Rx_Buffer, &length, BEACON_SEARCH_TIME) == SEARCH_OK)
 	{
 		DEBUG_TX("Received grant\r\n\0");
 		equal = 1;
@@ -1102,6 +1159,7 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 	static uint8_t 		local_function;
 	uint8_t 			found 					= 0;
 	uint16_t 			search_time;
+	int 				length;
 
 	sprintf(debug_buff, "Send attempt: %d\r\n", send_attempt);
 	DEBUG_TX(debug_buff);
@@ -1115,7 +1173,7 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 	}
 	if(beacon)
 	{
-		if(Message_Search(beacon_address, Rx_Buffer, BEACON_SEARCH_TIME) == SEARCH_OK)
+		if(Message_Search(beacon_address, Rx_Buffer, &length, BEACON_SEARCH_TIME) == SEARCH_OK)
 		{
 			DEBUG_TX("Manage_Send found beacon\r\n\0");
 			Send_Delay();
@@ -1134,7 +1192,7 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 			search_time = FIRST_ACK_SEARCH_TIME;
 		else
 			search_time = ACK_SEARCH_TIME;
-		if (Message_Search(node_address, Rx_Buffer, search_time) == SEARCH_OK)
+		if (Message_Search(node_address, Rx_Buffer, &length, search_time) == SEARCH_OK)
 			found = 1;
 		if(found)
 		{
@@ -1163,7 +1221,7 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 			else
 			{
 				DEBUG_TX("Another message received when expecting ack\r\n\0");
-				found = 0;
+				//found = 0;  // Ignore the new message now, but break out of ack loop
 			}
 		}
 		if(!found)
@@ -1213,20 +1271,39 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 
 void Listen_Radio(uint8_t reset_fail_count)
 {
-	static uint8_t fail_count = 0;
+	static uint8_t 		fail_count 			= 0;
+	static uint8_t 		time_rssi_sent 		= 0;
+	uint8_t				len 				= 0;
+	uint32_t 			now;
+	int 				length;
+
 	if(reset_fail_count)
 		fail_count = 0;
-	sprintf(debug_buff, "Listen radio, fail: %d\r\n\0", (int)fail_count);
+	sprintf(debug_buff, "Listen_Radio, fail: %d\r\n", (int)fail_count);
 	DEBUG_TX(debug_buff);
-	if(Message_Search(node_address, Rx_Buffer, ACK_SEARCH_TIME) == SEARCH_OK)
+	if(Message_Search(node_address, Rx_Buffer, &length, ACK_SEARCH_TIME) == SEARCH_OK)
 	{
 		uint8_t data[] = {0x00, 0x00};
 		if(Rx_Buffer[4] == f_config)
 		{
 			DEBUG_TX("Listen_Radio. Config message received\r\n\0");
+			if(!start_from_reset)
+			{
+				now = Cbr_Now();
+				if((now - time_rssi_sent) > 300)  // To stop us sending this lots of time during a reconfig
+				{
+					time_rssi_sent = now;
+					temperature = Get_Temperature();
+					rssi = Get_RSSI();
+					data[0] = temperature; data[1] = rssi;
+					len = 2;
+					sprintf(debug_buff,"Config ack data: %d %d\r\n", (int)data[0], (int)data[1]);
+					DEBUG_TX(debug_buff);
+				}
+			}
 			if(MODE != RATE)
-				Store_Config();
-			Send_Message(f_ack, 0, data, 0, 0);
+				Store_Config(length);
+			Send_Message(f_ack, len, data, 0, 0);
 			Set_Wakeup(0);
 		}
 		else if(Rx_Buffer[4] == f_start)
@@ -1307,11 +1384,36 @@ void Set_Wakeup(uint8_t error)
 	}
 }
 
-void Store_Config(void)
+void Store_Config(int length)
 {
 	uint8_t s, r, i = 0;
+	uint8_t j;
 	uint8_t pos = 12;
+	size_t output_length;
+
 	DEBUG_TX("Store_Config\r\n\0");
+	//sprintf(debug_buff, "Data: %s", Rx_Buffer+pos);
+	//DEBUG_TX(debug_buff);
+	//DEBUG_TX("\r\n\0");
+	/*
+	i = pos;
+	j = pos;
+	while(i<length)
+	{
+		if(Rx_Buffer[i] == "|")
+		{
+			Rx_Buffer[j] = Rx_Buffer[i+1]+128;
+			i = i+2;
+			j++;
+		}
+		else
+		{
+			Rx_Buffer[j] = Rx_Buffer[i];
+			i++;
+			j++;
+		}
+	}
+	*/
 	if(strncmp(Rx_Buffer+pos, "S", 1) == 0)
 	{
 		s = Rx_Buffer[pos+1];
@@ -1324,9 +1426,16 @@ void Store_Config(void)
 		for(i=0; i<Rx_Buffer[5]; i++)
 		{
 			screens[s][r][i] = Rx_Buffer[i+pos+4];
-			//sprintf(debug_buff, "%c", screens[s][r][i]);
-			//DEBUG_TX(debug_buff);
+		//	sprintf(debug_buff, "%c", screens[s][r][i]);
+		//	DEBUG_TX(debug_buff);
 		}
+		//DEBUG_TX(" \r\n\0");
+		//DEBUG_TX(" Store_Config, ord values:\r\n\0");
+		//for(i=0; i<Rx_Buffer[5]; i++)
+		//{
+		//	sprintf(debug_buff, "%d ", (char)(Rx_Buffer[i+pos+4]));
+		//}
+		//DEBUG_TX(" \r\n\0");
 		//sprintf(debug_buff, "Store_Config, screen: %d, reg: %d, %02x %02x %02x %02x %02x %02x\r\n", s, r, screens[s][r][0], screens[s][r][1], screens[s][r][2], screens[s][r][3], screens[s][r][4], screens[s][r][5]);
 		//DEBUG_TX(debug_buff);
 		config_stored++;
@@ -1424,18 +1533,18 @@ int Read_Battery(uint8_t send)
 }
 
 
-uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, uint16_t max_search_time)
+uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, int *length, uint16_t max_search_time)
 {
-	int search_start = Cbr_Now();
+	int search_start = SIXTEENTHS_NOW;
 	//sprintf(debug_buff, "Message_Search, address: %02x %02x\r\n", address[0], address[1]);
 	//DEBUG_TX(debug_buff);
 	while (1)
 	{
 		__HAL_UART_FLUSH_DRREGISTER(&huart3);
 		if(current_state != STATE_INITIAL) // So we can display "sending" message if there is no immediate ack
-			status = Rx_Message(Rx_Buffer, &length, 1500);
+			status = Rx_Message(Rx_Buffer, &length, 800);
 		else
-			status = Rx_Message(Rx_Buffer, &length, 8000);
+			status = Rx_Message(Rx_Buffer, &length, 1600);
 		if (status == HAL_OK)
 		{
 			//sprintf(debug_buff, "MS Rx: %02x %02x %02x %02x %02x %02x %02x %02x, Length: %d\r\n", Rx_Buffer[0], Rx_Buffer[1],
@@ -1445,7 +1554,7 @@ uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, uint16_t max_search
 			{
 				return SEARCH_OK;
 			}
-			if ((Cbr_Now() - search_start) > max_search_time)
+			if ((SIXTEENTHS_NOW - search_start) > max_search_time)
 			{
 				DEBUG_TX("Message_Search timeout\r\n\0");
 				return SEARCH_TIMEOUT;
@@ -1454,7 +1563,7 @@ uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, uint16_t max_search
 		else
 		{
 			__HAL_UART_FLUSH_DRREGISTER(&huart3);
-			if ((Cbr_Now() - search_start) > max_search_time)
+			if ((SIXTEENTHS_NOW - search_start) > max_search_time)
 			{
 				DEBUG_TX("Message_Search 2nd timeout error\r\n\0");
 				return SEARCH_ERROR;
@@ -1547,6 +1656,7 @@ void On_RTC_IRQ(void)
 	else if(states[current_state][S_W] != 0xFF)  // We were waiting in a state for a fixed time
 	{
 		DEBUG_TX("Woken up after delay\r\n\0");
+		Radio_On(1);
 		current_state = states[current_state][S_WS];
 		On_NewState();
 	}
@@ -1557,6 +1667,54 @@ void On_RTC_IRQ(void)
 		uint8_t data[] = {0x00, 0x00};
 		Send_Message(f_woken_up, 0, data, 1, 0);
 	}
+}
+
+int8_t Get_Temperature(void)
+{
+	int t;
+	uint8_t temperature;
+	RADIO_TXS("ER_CMD#T7", 9);
+	status = Rx_Message(Rx_Buffer, &length, 3000);
+	sprintf(debug_buff, "Temperature echo: %.*s\r\n", length, Rx_Buffer);
+	DEBUG_TX(debug_buff);
+	Delay_ms(5);
+	RADIO_TXS("ACK", 3);
+	status = Rx_Message(Rx_Buffer, &length, 3000);
+	sprintf(debug_buff, "Temperature: %.*s\r\n", length, Rx_Buffer);
+	DEBUG_TX(debug_buff);
+	t = atoi(Rx_Buffer);
+	if(t > 127)
+		t = 127;
+	else if(t < -128)
+		t = -128;
+	temperature = (int8_t)t;
+	sprintf(debug_buff, "Int temperature: %d\r\n", temperature);
+	DEBUG_TX(debug_buff);
+	return temperature;
+}
+
+int Get_RSSI(void)
+{
+	int r;
+	int8_t rssi;
+	RADIO_TXS("ER_CMD#T8", 9);
+	status = Rx_Message(Rx_Buffer, &length, 3000);
+	sprintf(debug_buff, "RSSI echo: %.*s\r\n", length, Rx_Buffer);
+	DEBUG_TX(debug_buff);
+	Delay_ms(5);
+	RADIO_TXS("ACK", 3);
+	status = Rx_Message(Rx_Buffer, &length, 3000);
+	sprintf(debug_buff, "RSSI: %.*s\r\n", length, Rx_Buffer);
+	DEBUG_TX(debug_buff);
+	r = atoi(Rx_Buffer);
+	if(r > 127)
+		r = 127;
+	else if(r < -128)
+		r = -128;
+	rssi = (int8_t)r;
+	sprintf(debug_buff, "Int RSSI: %d\r\n", rssi);
+	DEBUG_TX(debug_buff);
+	return rssi;
 }
 
 void Configure_And_Test(void)
@@ -1578,54 +1736,51 @@ void Configure_And_Test(void)
 	// Set OTA data rate to 1200 bps
 	RADIO_TXS("ER_CMD#B0", 9);
 	status = Rx_Message(Rx_Buffer, &length, 3000);
-	sprintf(debug_buff, "Received %.*s\r\n", length, Rx_Buffer);
-	DEBUG_TX(debug_buff);
-	Delay_ms(100);
+	DEBUG_TX("Received: ");
+	DEBUG_TXS(Rx_Buffer, 9);
+	DEBUG_TX("\r\n");
+	Delay_ms(5);
 	RADIO_TXS("ACK", 3);
-	Delay_ms(200);
+	Delay_ms(5);
 
-	RADIO_TXS("Hello World", 11);
-	DEBUG_TX("Sent Hello World\r\n\0");
-	Delay_ms(50);
-	status = Rx_Message(Rx_Buffer, &length, 7000);
+	//RADIO_TXS("Hello World", 11);
+	//DEBUG_TX("Sent Hello World\r\n\0");
+	//Delay_ms(50);
+	status = Rx_Message(Rx_Buffer, &length, 8000);
 	if (status == HAL_OK)
 	{
+		bridge_address[0] = Rx_Buffer[2]; bridge_address[1] = Rx_Buffer[3];
 		network_found = 1;
 		sprintf(debug_buff, "Received %.*s\r\n", length, Rx_Buffer);
-		DEBUG_TX(debug_buff);
-		// Get RSSI
-		RADIO_TXS("ER_CMD#T8", 9);
-		status = Rx_Message(Rx_Buffer, &length, 3000);
-		sprintf(debug_buff, "RSSI echo: %.*s\r\n", length, Rx_Buffer);
-		DEBUG_TX(debug_buff);
-		Delay_ms(100);
-		RADIO_TXS("ACK", 3);
-		status = Rx_Message(Rx_Buffer, &length, 3000);
-		sprintf(debug_buff, "RSSI: %.*s\r\n", length, Rx_Buffer);
 		DEBUG_TX(debug_buff);
 	}
 	else
 		DEBUG_TX("Receive problem\r\n\0");
+	temperature = Get_Temperature();
+	rssi = Get_RSSI();
 	Radio_Off();
 	sprintf(debug_buff, "Battery voltage: %d.%d\r\n", (int)(voltage/100), voltage%100);
 	DEBUG_TX(debug_buff);
 	sprintf(screens[16][0], "F\x02Y\x04G\x13Node ID: %010d", (int)node_id_int);
 	screens[16][0][4] = 0x43;  // C
-	sprintf(screens[16][0]+26, "Y\x1AG\x15Gattery voltage: %d.%d", (int)(voltage/100), voltage%100);
+	//sprintf(screens[16][0]+26, "Y\x1AG\x15Gattery voltage: %d.%d", (int)(voltage/100), voltage%100);
+	//screens[16][0][28] = 0x43;  // C
+	//screens[16][0][30] = 0x42;  // B
+	sprintf(screens[16][0]+26, "Y\x1AG\x1AVer: %03d    Battery: %1d.%2dV", VERSION, (int)(voltage/100), voltage%100);
 	screens[16][0][28] = 0x43;  // C
-	screens[16][0][30] = 0x42;  // B
 	if(network_found)
 	{
-	  	sprintf(screens[16][0]+52, "Y\x30G\x0DRSSI: %7s", Rx_Buffer);
-	  	screens[16][0][54] = 0x43;  // C
+	  	sprintf(screens[16][0]+57, "Y\x30G\x16Gridge %02X%02X: %7s", (int)bridge_address[0], (int)bridge_address[1], Rx_Buffer);
+	  	screens[16][0][59] = 0x43;  // C
+		screens[16][0][61] = 0x42;  // B
 	}
 	else
 	{
-	  	sprintf(screens[16][0]+52, "Y\x30G\x0D No network  ");
-	  	screens[16][0][54] = 0x43;  // C
+	  	sprintf(screens[16][0]+59, "Y\x30G\x10No network found");
+	  	screens[16][0][61] = 0x43;  // C
 	}
-	sprintf(screens[16][0]+70, "Y\x46G\x15Push here to continue");
-	screens[16][0][72] = 0x43;  // C
+	sprintf(screens[16][0]+84, "Y\x46G\x15Push here to continue");
+	screens[16][0][86] = 0x43;  // C
 	Set_Display(STATE_TEST);
 }
 
