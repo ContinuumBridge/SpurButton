@@ -66,16 +66,16 @@
 //#include "icons32x30.h"                                                                 /* Include icons */
 //#include "Courier13x17.h"                                                               /* Include font */
 //#include "Sanus_Webissimo24x32.h"                                                       /* Include font */
-#include "Arial_Rounded_MT_Bold26x27.h"                                                 /* Include font */
+//#include "Arial_Rounded_MT_Bold26x27.h"                                                 /* Include font */
 //#include "Copperplate_Gothic_Bold30x24.h"                                               /* Include font */
 //#include "Copperplate_Gothic_Bold27x22.h"                                               /* Include font */
-#include "Arial_Rounded_MT_Bold19x20.h"                                                 /* Include font */
+//#include "Arial_Rounded_MT_Bold19x20.h"                                                 /* Include font */
 //#include "Verdana_Pro_SemiBold18x16.h"                                                  /* Include font */
 //#include "Arial_Narrow16x20.h"                                                          /* Include font */
-#include "Arial_Narrow14x20.h"                                                          /* Include font */
-#include "Arial_Narrow16x23.h"                                                          /* Include font */
-#include "Arial_Narrow18x26.h"                                                          /* Include font */
-
+#include "Arial_Narrow14x20.h"                                                           /* Include font */
+#include "Arial_Narrow16x23.h"                                                           /* Include font */
+#include "Arial_Narrow18x26.h"                                                           /* Include font */
+#include "Arial_Unicode_MS17x20.h"                                                       /* Include font */
 
 extern int _Lib_Sprintf__doprntf(char  * pb,  const char * f, register va_list ap);     /* Required for printf style routines */
 // PCX

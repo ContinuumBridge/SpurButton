@@ -30,6 +30,9 @@
 
 #define BEACON_ADDRESS      0xBBBB
 #define GRANT_ADDRESS       0xBB00
+#define RIGHT_SIDE			0
+#define LEFT_SIDE			1
+#define BOTH_SIDES			2
 
 #define LPRS_HEADER_LENGTH 	6
 #define ARRAY_CONCAT(TYPE, A, An, B, Bn) \
@@ -50,6 +53,7 @@
 
 extern uint8_t 			button_irq;
 extern char 			debug_buff[128];
+extern int8_t 			temperature;
 
 void *array_concat(const void *a, size_t an, const void *b, size_t bn, size_t s);
 void Radio_Tx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size);
@@ -71,7 +75,7 @@ void RTC_Delay(uint32_t delay);
 uint32_t Cbr_Now(void);
 uint32_t Cbr_Time(uint8_t h, uint8_t m, uint8_t s);
 void HMS(uint32_t e, uint8_t *h, uint8_t *m, uint8_t *s);
-void Enable_IRQ(void);
+void Enable_IRQ(uint8_t using_sode);
 
 #ifdef __cplusplus
 }

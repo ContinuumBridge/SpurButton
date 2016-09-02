@@ -86,9 +86,11 @@ extern uint8_t ecog_enable_display(void);
 extern uint8_t ecog_display_enabled;
 uint8_t ecog_update_display(uint8_t powered);
 uint8_t ecog_write_inverse(uint8_t powered);
+extern  void ecog_blank_screen(int line_type);
 extern void ecog_plot(int16_t x,int16_t y,uint8_t m);
 extern uint8_t ecog_buffer[];
 extern void ecog_dump(void);
+extern void ecog_discharge_capacitors(void);
 
 
 /*********************
