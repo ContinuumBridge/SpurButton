@@ -51,6 +51,7 @@ Note that all messages from a bridge to a node include a “time to next wake-up
 |0x09 | Node | Alert | A node sends an alert to its associated bridge | Normal operatiion |
 |0x0A | Bridge | Beacon | Beacon messages are broadcast periodically by a bridge. Nodes use these messages to identify local networks. A beacon message is never encrypted | Always |
 |0x0B | Bridge | Start | Sent after configuration download is complete | Always |
+|0x0C | Bridge | Nack | Indicates message received but there is a comms problem and node should go into its "communication problem" state | Always |
 
 All function codes are fully described in the relevant sections below. These are split into Generic, Network Inclusion (adding a node to a network) and Normal Operation.
 
@@ -73,6 +74,8 @@ Screen definitions consist of a series of key characters, each followed by one o
     Bwh Draw a box starting at (x, y), width w, height h
     Tx String of length x follows
     Cx Centred string of length x follows
+    lx String centred in left hand half of the screen. String of length x follows
+    rx String centred in right hand half of the screen. String of length x follows
     ER End of region
     ES End of screen. There is no ER before this
 
