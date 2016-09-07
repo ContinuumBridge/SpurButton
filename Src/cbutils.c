@@ -218,4 +218,15 @@ void Enable_IRQ(uint8_t using_side)
 	return;
 }
 
-
+void Print_To_Debug(uint8_t *buffer, int length)
+{
+	int i;
+	DEBUG_TX("Received:\r\n\0");
+	for(i=0; i<length; i++)
+	{
+		sprintf(debug_buff, "%x ", *buffer);
+		DEBUG_TX(debug_buff);
+		buffer++;
+	}
+	DEBUG_TX("\r\n\0");
+}

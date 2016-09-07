@@ -24,6 +24,8 @@ void Load_Normal_Screens(void)
 	// Not very elegant, but it does the job and it shouldn't need to change:
 	int i, s;
 	//char buff[25];
+	strcpy(screens[17][0], "F\x03" "Y\x05" "C\x07" "Network\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
+			              	  "C\x0A" "Not in use\xFF" "ES");
 	strcpy(screens[18][0], "F\x03" "Y\x05" "C\x0C" "Message sent\xFF" "Y\x20" "C\x0B" "Waiting for\xFF" "Y\x3D"
 		              	  "C\x08" "response\xFF" "ES");
 	sprintf(screens[19][0], "F\x02Y\x04G\x13Node ID: %010d", node_id_int);
@@ -39,7 +41,11 @@ void Load_Normal_Screens(void)
 	strcpy(screens[22][0], "F\x02" "Y\x10" "C\x0B" "Spur button\xFF" "Y\x32" "C\x0E" "name not known\xFF" "ES");
 	strcpy(screens[23][0], "F\x03" "Y\x05" "C\x0D" "Communication\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
 		              	  "C\x0A" "Not in use\xFF" "ES");
-	for(s=18; s<24; s++)
+	sprintf(screens[24][0], "F\x02Y\x04G\x13Node ID: %010d", node_id_int);
+	screens[24][0][4] = 0x43;  // C
+	strcpy(screens[24][0] + 26, "Y\x1A" "C\x14" "ID not registered in\xFF"
+			              "Y\x30" "C\x1A" "portal.spur.site. Enter it\xFF" "Y\x46" "C\x19" "then push here to connect\xFF" "ES");
+	for(s=17; s<25; s++)
 		for(i=0; i<128; i++)
 			if(screens[s][0][i] == 0xFF)
 				screens[s][0][i] = 0x00;

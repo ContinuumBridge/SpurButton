@@ -43,12 +43,14 @@
 
 #define STATE_TEST				16
 #define STATE_INITIAL_TEST		26
+#define STATE_NETWORK_PROBLEM	17
 #define STATE_SENDING			18
 #define STATE_INITIAL 			19
 #define STATE_CONNECTING 		20
 #define STATE_CONFIG 			21
 #define STATE_START 			22
 #define STATE_PROBLEM 			23
+#define STATE_NOT_GRANT			24
 #define STATE_DEMO				25
 #define STATE_NORMAL 			1
 #define STATE_PRESSED 			2
@@ -61,7 +63,7 @@
 #define SEND_TIMEOUT 			1
 #define BEACON_SEARCH_TIME 		160  // Units: 1/16 second
 #define FIRST_ACK_SEARCH_TIME   16   // Units: 1/16 second
-#define ACK_SEARCH_TIME         24   // Units: 1/16 secon
+#define ACK_SEARCH_TIME         48   // Units: 1/16 secon
 #define ONE_DAY 				(24*60*60)
 #define T_LONG_PRESS          	2    // Units: 1 second
 #define T_DOUBLE_PRESS_16		8    // Units: 1/16 second
@@ -83,7 +85,9 @@
 #define  f_ack                	0x08
 #define  f_beacon             	0x0A
 #define  f_start             	0x0B
-#define	 f_unknown				0x0C
+#define  f_nack                	0x0C
+#define  f_include_not         	0x0D
+#define	 f_unknown				0x0E
 
 #define PRESS_LEFT_SINGLE	  	0
 #define PRESS_RIGHT_SINGLE    	1
@@ -122,7 +126,7 @@ uint8_t 			node_id[] 				= {0x00, 0x00, 0x00, 0x00};
 
 char 				debug_buff[128] 		= {0};
 char 				screens[MAX_SCREEN][1][194];
-uint8_t				states[24][16]     		= {0xFF};
+uint8_t				states[27][16]     		= {0xFF};
 
 HAL_StatusTypeDef 	status;
 int 				length;
@@ -188,7 +192,7 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 void Initialise_States(void);
 void On_NewState(void);
 int Read_Battery(uint8_t send);
-int Get_RSSI(void);
+int8_t Get_RSSI(void);
 void Configure_And_Test(void);
 int8_t Get_Temperature(void);
 
@@ -279,9 +283,25 @@ int main(void)
   Radio_Off();
   for(i=0; i<4; i++)
 	  tx_data[i] = node_id[i];
-  tx_data[4] = temperature; tx_data[5] = rssi;
+  tx_data[4] = (uint8_t)VERSION; tx_data[5] = rssi;
   sprintf(debug_buff,"RSSI to send: %d %d %d %d %d %d\r\n", (int)tx_data[0], (int)tx_data[1], (int)tx_data[2], (int)tx_data[3], (int)tx_data[4], (int)tx_data[5]);
   DEBUG_TX(debug_buff);
+  /*
+  Radio_On(1);
+__HAL_UART_FLUSH_DRREGISTER(&huart3);
+  status = Rx_Message(Rx_Buffer, &length, 8000);
+  if (status == HAL_OK)
+  {
+	  bridge_address[0] = Rx_Buffer[2]; bridge_address[1] = Rx_Buffer[3];
+	  sprintf(debug_buff, "Received %x %x %x %x %x %x\r\n", Rx_Buffer[0], Rx_Buffer[1], Rx_Buffer[2], Rx_Buffer[3],
+						Rx_Buffer[4], Rx_Buffer[5]);
+	  DEBUG_TX(debug_buff);
+  }
+  else
+	  DEBUG_TX("Receive problem\r\n\0");
+  rssi = Get_RSSI();
+  */
+  Radio_Off();
   DEBUG_TX("Waiting\r\n\0");
   HAL_UART_MspDeInit(&huart1);
   HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
@@ -782,6 +802,8 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 	{
 		return;
 	}
+	sprintf(debug_buff, "current_state: %d\r\n", current_state);
+	DEBUG_TX(debug_buff);
 	if(current_state == STATE_INITIAL_TEST)
 	{
 		current_state = STATE_INITIAL;
@@ -829,6 +851,11 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 			stop_mode = 1;
 			return;
 		}
+	}
+	else if (current_state == STATE_NOT_GRANT)
+	{
+		include_state = 0;
+		Network_Include();
 	}
 	else if(current_state == STATE_DEMO)
 	{
@@ -953,7 +980,6 @@ void Network_Include(void)
 {
 	uint8_t equal = 1;
 	uint8_t tx_data[6];
-	int length;
 	int i;
 
 	DEBUG_TX("Network_Include\r\n\0");
@@ -962,21 +988,15 @@ void Network_Include(void)
 		Set_Display(STATE_CONNECTING);
 		include_state = 1;
 	}
-	else if(include_state == 1)
-	{
-		include_state = 2;
-	}
-	else if(include_state == 2)
-		include_state = 3;
+	else if(include_state < 16)
+		include_state++;
 	Radio_On(1);
 	if(Message_Search(beacon_address, Rx_Buffer, &length, BEACON_SEARCH_TIME) == SEARCH_OK)
 	{
-
-		sprintf(debug_buff, "Received %x %x %x %x %x %x\r\n", Rx_Buffer[0], Rx_Buffer[1], Rx_Buffer[2], Rx_Buffer[3],
-				Rx_Buffer[4], Rx_Buffer[5]);
-		DEBUG_TX(debug_buff);
+		DEBUG_TX("Include. Beacon:");
+		Print_To_Debug(&Rx_Buffer, length);
 		bridge_address[0] = Rx_Buffer[2]; bridge_address[1] = Rx_Buffer[3];
-		temperature = Get_Temperature();
+		rssi = Get_RSSI();
 		rssi = Get_RSSI();
 		for(i=0; i<4; i++)
 			tx_data[i] = node_id[i];
@@ -1002,6 +1022,10 @@ void Network_Include(void)
 				Set_Display(STATE_PROBLEM);
 				RTC_Delay(600);
 				break;
+			case 4:
+				Radio_Off();
+				RTC_Delay(1800);
+				break;
 			default:
 				Radio_Off();
 				RTC_Delay(3600);
@@ -1010,7 +1034,6 @@ void Network_Include(void)
 	}
 	if(Message_Search(grant_address, Rx_Buffer, &length, BEACON_SEARCH_TIME) == SEARCH_OK)
 	{
-		DEBUG_TX("Received grant\r\n\0");
 		equal = 1;
 		for(i=0; i<4; i++)
 			if(Rx_Buffer[i+12] != node_id[i])
@@ -1020,15 +1043,25 @@ void Network_Include(void)
 			}
 		if(equal)
 		{
-			node_address[0] = Rx_Buffer[16]; node_address[1] = Rx_Buffer[17];
-			uint8_t data[] = {0x00, 0x00};
-			Send_Message(f_ack, 0, data, 0, 0);
-			DEBUG_TX("Sent ack for grant\r\n\0");
-			include_state = 0;
-			current_state = STATE_CONFIG;
-			On_NewState();
-			DEBUG_TX("Sending woken_up after grant\r\n\0");
-			Send_Message(f_woken_up, 0, data, 1, 0);
+			if(Rx_Buffer[4] == f_include_grant)
+			{
+				DEBUG_TX("Received grant\r\n\0");
+				node_address[0] = Rx_Buffer[16]; node_address[1] = Rx_Buffer[17];
+				uint8_t data[] = {0x00, 0x00};
+				Send_Message(f_ack, 0, data, 0, 0);
+				DEBUG_TX("Sent ack for grant\r\n\0");
+				include_state = 0;
+				current_state = STATE_CONFIG;
+				On_NewState();
+				DEBUG_TX("Sending woken_up after grant\r\n\0");
+				Send_Message(f_woken_up, 0, data, 1, 0);
+			}
+			else if(Rx_Buffer[4] == f_include_not)
+			{
+				DEBUG_TX("Received include_not\r\n\0");
+				current_state = STATE_NOT_GRANT;
+				On_NewState();
+			}
 		}
 	}
 	else
@@ -1206,7 +1239,8 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 				uint32_t wakeup = ((Rx_Buffer[10] << 8) | Rx_Buffer[11]) << 1;
 				if(wakeup != 0)
 					Radio_Off();  // Turn radio off ASAP, before updating display
-				if((current_state == STATE_PROBLEM) && (include_state == 0))  // Comms had failed by came back after a wake up
+				if(((current_state == STATE_PROBLEM) || (current_state == STATE_NETWORK_PROBLEM)) &&
+						(include_state == 0))  // Comms had failed by came back after a wake up
 				{
 					DEBUG_TX("Back from the dead\r\n\0");
 					current_state = STATE_NORMAL;
@@ -1217,6 +1251,15 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 					Set_Display(states[current_state][S_D]);
 				}
 				Set_Wakeup(0);
+			}
+			else if(Rx_Buffer[4] == f_nack)
+			{
+				send_attempt = 0;
+				DEBUG_TX("Nack received\r\n\0");
+				Radio_Off();  // Turn radio off ASAP, before updating display
+				current_state = STATE_NETWORK_PROBLEM;
+				Set_Wakeup(0);
+				Set_Display(states[current_state][S_D]);
 			}
 			else
 			{
@@ -1533,9 +1576,10 @@ int Read_Battery(uint8_t send)
 }
 
 
-uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, int *length, uint16_t max_search_time)
+uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, int *ms_length, uint16_t max_search_time)
 {
 	int search_start = SIXTEENTHS_NOW;
+	int length;
 	//sprintf(debug_buff, "Message_Search, address: %02x %02x\r\n", address[0], address[1]);
 	//DEBUG_TX(debug_buff);
 	while (1)
@@ -1545,6 +1589,7 @@ uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, int *length, uint16
 			status = Rx_Message(Rx_Buffer, &length, 800);
 		else
 			status = Rx_Message(Rx_Buffer, &length, 1600);
+		ms_length = &length;
 		if (status == HAL_OK)
 		{
 			//sprintf(debug_buff, "MS Rx: %02x %02x %02x %02x %02x %02x %02x %02x, Length: %d\r\n", Rx_Buffer[0], Rx_Buffer[1],
@@ -1673,6 +1718,7 @@ int8_t Get_Temperature(void)
 {
 	int t;
 	uint8_t temperature;
+	__HAL_UART_FLUSH_DRREGISTER(&huart3);
 	RADIO_TXS("ER_CMD#T7", 9);
 	status = Rx_Message(Rx_Buffer, &length, 3000);
 	sprintf(debug_buff, "Temperature echo: %.*s\r\n", length, Rx_Buffer);
@@ -1693,19 +1739,19 @@ int8_t Get_Temperature(void)
 	return temperature;
 }
 
-int Get_RSSI(void)
+int8_t Get_RSSI(void)
 {
 	int r;
 	int8_t rssi;
+	__HAL_UART_FLUSH_DRREGISTER(&huart3);
 	RADIO_TXS("ER_CMD#T8", 9);
 	status = Rx_Message(Rx_Buffer, &length, 3000);
-	sprintf(debug_buff, "RSSI echo: %.*s\r\n", length, Rx_Buffer);
-	DEBUG_TX(debug_buff);
+	DEBUG_TX("RSSI echo:");
+	Print_To_Debug(&Rx_Buffer, length);
 	Delay_ms(5);
 	RADIO_TXS("ACK", 3);
 	status = Rx_Message(Rx_Buffer, &length, 3000);
-	sprintf(debug_buff, "RSSI: %.*s\r\n", length, Rx_Buffer);
-	DEBUG_TX(debug_buff);
+	DEBUG_TX("RSSI:");
 	r = atoi(Rx_Buffer);
 	if(r > 127)
 		r = 127;
@@ -1724,48 +1770,42 @@ void Configure_And_Test(void)
 
 	voltage = Read_Battery(0);
 	Radio_On(1);
+	__HAL_UART_FLUSH_DRREGISTER(&huart3);
 	RADIO_TXS("ER_CMD#R0", 9);
 	status = Rx_Message(Rx_Buffer, &length, 3000);
-	DEBUG_TX("Received: ");
-	DEBUG_TXS(Rx_Buffer, 9);
-	DEBUG_TX("\r\n\0");
-	Delay_ms(100);
+	DEBUG_TX("Reset radio:");
+	Print_To_Debug(&Rx_Buffer, length);
+	Delay_ms(10);
 	RADIO_TXS("ACK", 3);
 	Delay_ms(200);
 
 	// Set OTA data rate to 1200 bps
+	__HAL_UART_FLUSH_DRREGISTER(&huart3);
 	RADIO_TXS("ER_CMD#B0", 9);
 	status = Rx_Message(Rx_Buffer, &length, 3000);
-	DEBUG_TX("Received: ");
-	DEBUG_TXS(Rx_Buffer, 9);
-	DEBUG_TX("\r\n");
+	DEBUG_TX("Reset b/w:");
+	Print_To_Debug(&Rx_Buffer, length);
 	Delay_ms(5);
 	RADIO_TXS("ACK", 3);
 	Delay_ms(5);
 
-	//RADIO_TXS("Hello World", 11);
-	//DEBUG_TX("Sent Hello World\r\n\0");
-	//Delay_ms(50);
+	__HAL_UART_FLUSH_DRREGISTER(&huart3);
 	status = Rx_Message(Rx_Buffer, &length, 8000);
 	if (status == HAL_OK)
 	{
 		bridge_address[0] = Rx_Buffer[2]; bridge_address[1] = Rx_Buffer[3];
 		network_found = 1;
-		sprintf(debug_buff, "Received %.*s\r\n", length, Rx_Buffer);
-		DEBUG_TX(debug_buff);
+		DEBUG_TX("Rx from network:");
+		Print_To_Debug(&Rx_Buffer, length);
 	}
 	else
 		DEBUG_TX("Receive problem\r\n\0");
-	temperature = Get_Temperature();
 	rssi = Get_RSSI();
 	Radio_Off();
 	sprintf(debug_buff, "Battery voltage: %d.%d\r\n", (int)(voltage/100), voltage%100);
 	DEBUG_TX(debug_buff);
 	sprintf(screens[16][0], "F\x02Y\x04G\x13Node ID: %010d", (int)node_id_int);
 	screens[16][0][4] = 0x43;  // C
-	//sprintf(screens[16][0]+26, "Y\x1AG\x15Gattery voltage: %d.%d", (int)(voltage/100), voltage%100);
-	//screens[16][0][28] = 0x43;  // C
-	//screens[16][0][30] = 0x42;  // B
 	sprintf(screens[16][0]+26, "Y\x1AG\x1AVer: %03d    Battery: %1d.%2dV", VERSION, (int)(voltage/100), voltage%100);
 	screens[16][0][28] = 0x43;  // C
 	if(network_found)
@@ -1776,8 +1816,8 @@ void Configure_And_Test(void)
 	}
 	else
 	{
-	  	sprintf(screens[16][0]+59, "Y\x30G\x10No network found");
-	  	screens[16][0][61] = 0x43;  // C
+	  	sprintf(screens[16][0]+57, "Y\x30G\x16   No network found   ");
+	  	screens[16][0][59] = 0x43;  // C
 	}
 	sprintf(screens[16][0]+84, "Y\x46G\x15Push here to continue");
 	screens[16][0][86] = 0x43;  // C
@@ -1787,17 +1827,22 @@ void Configure_And_Test(void)
 void Initialise_States(void)
 {
     //                               S   D    A   LD    LS   MS  MD   RS   RD   XV   XS    W   WS
-	static const uint8_t test[16] = {16, 16, 255,   0,   0,   0,   0,   0,   0, 255,  0, 255, 255}; // Test
+	static const uint8_t test[16] = {16, 16, 255,   0,   0,   0,   0,   0,   0, 255,   0, 255, 255}; // Test
+	static const uint8_t nprb[16] = {17, 17, 255,  22, 255, 255,  22, 255,  22, 255,   0, 255, 255}; // Network Problem
 	static const uint8_t init[16] = {19, 19, 255,  20, 255, 255,  20, 255,  20, 255, 255, 255, 255}; // Push to Connect
 	static const uint8_t conn[16] = {20, 20, 255, 255, 255, 255, 255, 255, 255,   2,  21, 255, 255}; // Connecting
 	static const uint8_t conf[16] = {21, 21, 255,  19,  19,  19,  19,  19,  19,  13,   0, 255, 255}; // Configuring
 	static const uint8_t strt[16] = {22, 22, 255,   0, 255, 255,   0, 255,   0,  13,   0, 255, 255}; // Double-push to start
-	static const uint8_t prob[16] = {23, 23, 255,  22, 255, 255,  19, 255,  22,  255,  0, 255, 255}; // Comms Problem
+	static const uint8_t prob[16] = {23, 23, 255,  22, 255, 255,  22, 255,  22,  255,  0, 255, 255}; // Comms Problem
+	static const uint8_t ngnt[16] = {24, 24, 255,  20,  20,  20,  20,  20,  20, 255, 255, 255, 255}; // include_not
+	memcpy(states[STATE_TEST], test, sizeof(test));
 	memcpy(states[STATE_INITIAL], init, sizeof(init));
+	memcpy(states[STATE_NETWORK_PROBLEM], nprb, sizeof(nprb));
 	memcpy(states[STATE_CONNECTING], conn, sizeof(conn));
 	memcpy(states[STATE_CONFIG], conf, sizeof(conf));
 	memcpy(states[STATE_START], strt, sizeof(strt));
 	memcpy(states[STATE_PROBLEM], prob, sizeof(prob));
+	memcpy(states[STATE_NOT_GRANT], ngnt, sizeof(ngnt));
 }
 
 /**

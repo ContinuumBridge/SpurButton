@@ -76,6 +76,7 @@ uint32_t Cbr_Now(void);
 uint32_t Cbr_Time(uint8_t h, uint8_t m, uint8_t s);
 void HMS(uint32_t e, uint8_t *h, uint8_t *m, uint8_t *s);
 void Enable_IRQ(uint8_t using_sode);
+void Print_To_Debug(uint8_t *buffer, int length);
 
 #ifdef __cplusplus
 }
