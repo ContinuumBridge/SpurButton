@@ -1021,8 +1021,8 @@ void ecog_discharge_capacitors(void)
   else
 	  discharge_time = 400;
   discharge_time = 200;
-  sprintf(debug_buff, "Discharge: %d\r\n", discharge_time);
-  DEBUG_TX(debug_buff);
+  //sprintf(debug_buff, "Discharge: %d\r\n", discharge_time);
+  //DEBUG_TX(debug_buff);
   timers_sdelay(discharge_time);                                                        /* Delay 150ms */
   ECOG_DISCHARGE_OFF;                                                                   /* Discharge off */
 }

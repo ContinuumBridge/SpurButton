@@ -52,7 +52,7 @@
 #define STATE_PROBLEM 			23
 #define STATE_NOT_GRANT			24
 #define STATE_DEMO				25
-#define STATE_NORMAL 			1
+#define STATE_NORMAL 			0
 #define STATE_PRESSED 			2
 #define STATE_OVERRIDE 			3
 
@@ -61,7 +61,7 @@
 #define SEARCH_ERROR 			2
 #define SEND_OK 				0
 #define SEND_TIMEOUT 			1
-#define BEACON_SEARCH_TIME 		160  // Units: 1/16 second
+#define BEACON_SEARCH_TIME 		320  // Units: 1/16 second
 #define FIRST_ACK_SEARCH_TIME   16   // Units: 1/16 second
 #define ACK_SEARCH_TIME         48   // Units: 1/16 secon
 #define ONE_DAY 				(24*60*60)
@@ -179,7 +179,7 @@ uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, int *length, uint16
 void Send_Message(uint8_t function, uint8_t data_length, uint8_t *data, uint8_t ack, uint8_t beacon);
 void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function);
 void Network_Include(void);
-void Listen_Radio(uint8_t reset_fail_count);
+void Listen_Radio(uint8_t reset_fail_count, uint8_t no_listen);
 void Set_Wakeup(uint8_t force_awake);
 void Build_Screen(uint8_t screen_num);
 void Store_Config(int length);
@@ -193,7 +193,7 @@ void Initialise_States(void);
 void On_NewState(void);
 int Read_Battery(uint8_t send);
 int8_t Get_RSSI(void);
-void Configure_And_Test(void);
+void Configure_And_Test(uint8_t reset);
 int8_t Get_Temperature(void);
 
 /* USER CODE BEGIN PFP */
@@ -279,7 +279,7 @@ int main(void)
   ecog_init();
 
   // Reset radio
-  Configure_And_Test();
+  Configure_And_Test(1);
   Radio_Off();
   for(i=0; i<4; i++)
 	  tx_data[i] = node_id[i];
@@ -802,8 +802,6 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 	{
 		return;
 	}
-	sprintf(debug_buff, "current_state: %d\r\n", current_state);
-	DEBUG_TX(debug_buff);
 	if(current_state == STATE_INITIAL_TEST)
 	{
 		current_state = STATE_INITIAL;
@@ -905,7 +903,7 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 			case PRESS_LEFT_LONG:
 			case PRESS_RIGHT_LONG:
 				current_state = STATE_TEST;
-				Configure_And_Test();
+				Configure_And_Test(0);
 				return;
 			default:
 				DEBUG_TX("Warning. Undefined button_press\r\n\0");
@@ -1026,9 +1024,21 @@ void Network_Include(void)
 				Radio_Off();
 				RTC_Delay(1800);
 				break;
-			default:
+			case 5:
+			case 6:
+			case 7:
+			case 8:
 				Radio_Off();
 				RTC_Delay(3600);
+				break;
+			case 9:
+			case 10:
+				Radio_Off();
+				RTC_Delay(21600);
+				break;
+			default:
+				Radio_Off();
+				RTC_Delay(43200);
 		}
 		return;
 	}
@@ -1101,13 +1111,19 @@ void Radio_Tx_IT(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size
 	}
 }
 
-void Radio_Tx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size)
+HAL_StatusTypeDef Radio_Tx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size)
 {
-	radio_ready = RESET;
-	if(HAL_UART_Transmit(uart, (uint8_t *)buffer, buffer_size, 1000) != HAL_OK)
+	HAL_StatusTypeDef 		status;
+	uint32_t 				f = 1000000;
+	while((HAL_GPIO_ReadPin(GPIOB, RADIO_BUSY_Pin) == GPIO_PIN_SET) && f--)
+	{
+	}
+	status = HAL_UART_Transmit(uart, (uint8_t *)buffer, buffer_size, 1000);
+	if(status != HAL_OK)
 	{
 		DEBUG_TX("Radio Tx Error\r\n\0");
 	}
+	return status;
 }
 
 void Radio_Rx_IT(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size)
@@ -1129,7 +1145,13 @@ uint16_t Radio_Rx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_siz
 
 void Radio_On(int delay)
 {
+	GPIO_InitTypeDef 	GPIO_InitStruct;
 	DEBUG_TX("Radio_On\r\n\0");
+	__GPIOB_CLK_ENABLE();
+	GPIO_InitStruct.Pin = RADIO_BUSY_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
     HAL_GPIO_WritePin(GPIOB, HOST_READY_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(RADIO_POWER_GPIO_Port, RADIO_POWER_Pin, GPIO_PIN_SET);
     HAL_UART_MspInit(&huart3);
@@ -1193,10 +1215,11 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 	uint8_t 			found 					= 0;
 	uint16_t 			search_time;
 	int 				length;
+	HAL_StatusTypeDef 	status;
 
 	sprintf(debug_buff, "Send attempt: %d\r\n", send_attempt);
 	DEBUG_TX(debug_buff);
-	if(send_attempt == 4)
+	if((send_attempt == 3) || (send_attempt == 4))
 		Radio_On(1);
 	send_attempt++;
 	if(function != f_unknown)
@@ -1218,7 +1241,17 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 			return;
 		}
 	}
-	RADIO_TXS(tx_message, tx_length);
+	status = RADIO_TXS(tx_message, tx_length);
+	if(status != HAL_OK)
+	{
+		DEBUG_TX("Manage_Send Radio Tx error\r\n\0");
+		if (function != f_woken_up)
+			Set_Display(STATE_SENDING);
+		Radio_Off();
+		Send_Delay();
+		Radio_On(1);
+		status = RADIO_TXS(tx_message, tx_length);
+	}
 	if(ack)
 	{
 		if(send_attempt == 0)
@@ -1264,10 +1297,10 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 			else
 			{
 				DEBUG_TX("Another message received when expecting ack\r\n\0");
-				//found = 0;  // Ignore the new message now, but break out of ack loop
+				Listen_Radio(0, 1); // Call to decode the unexpected message
 			}
 		}
-		if(!found)
+		else // if(!found)
 		{
 			DEBUG_TX("Manage_Send no ack 1\r\n\0");
 			switch(send_attempt)
@@ -1275,22 +1308,25 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 				case 1:
 					if (function != f_woken_up)
 						Set_Display(STATE_SENDING);
-				case 2:
+					Manage_Send(1, beacon, local_function);
+					break;
 				case 3:
+					Radio_Off();
+					Send_Delay();
+					Manage_Send(1, beacon, local_function);
+					break;
+				case 2:
 					Send_Delay();
 				case 5:
-				case 9:
-					Radio_Off();
-					Delay_ms(200);
-					Radio_On(1);
 				case 6:
 				case 8:
+				case 9:
 				case 10:
 					Manage_Send(1, beacon, local_function);
 					break;
 				case 4:
 					Radio_Off();
-					RTC_Delay(30);
+					RTC_Delay(20);
 					break;
 				case 7:
 					DEBUG_TX("Manage_Send failure. Waiting 10 mins\r\n\0");
@@ -1312,7 +1348,7 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 	}
 }
 
-void Listen_Radio(uint8_t reset_fail_count)
+void Listen_Radio(uint8_t reset_fail_count, uint8_t no_listen)
 {
 	static uint8_t 		fail_count 			= 0;
 	static uint8_t 		time_rssi_sent 		= 0;
@@ -1324,12 +1360,13 @@ void Listen_Radio(uint8_t reset_fail_count)
 		fail_count = 0;
 	sprintf(debug_buff, "Listen_Radio, fail: %d\r\n", (int)fail_count);
 	DEBUG_TX(debug_buff);
-	if(Message_Search(node_address, Rx_Buffer, &length, ACK_SEARCH_TIME) == SEARCH_OK)
+	if((Message_Search(node_address, Rx_Buffer, &length, ACK_SEARCH_TIME) == SEARCH_OK) || no_listen)
 	{
 		uint8_t data[] = {0x00, 0x00};
 		if(Rx_Buffer[4] == f_config)
 		{
 			DEBUG_TX("Listen_Radio. Config message received\r\n\0");
+			/*
 			if(!start_from_reset)
 			{
 				now = Cbr_Now();
@@ -1344,9 +1381,10 @@ void Listen_Radio(uint8_t reset_fail_count)
 					DEBUG_TX(debug_buff);
 				}
 			}
+			*/
 			if(MODE != RATE)
 				Store_Config(length);
-			Send_Message(f_ack, len, data, 0, 0);
+			Send_Message(f_ack, 0, data, 0, 0);
 			Set_Wakeup(0);
 		}
 		else if(Rx_Buffer[4] == f_start)
@@ -1368,7 +1406,7 @@ void Listen_Radio(uint8_t reset_fail_count)
 			DEBUG_TX("Listen_Radio. Send battery received\r\n\0");
 			Send_Message(f_ack, 0, data, 0, 0);
 			Read_Battery(1);
-			Set_Wakeup(0);
+			//Set_Wakeup(0);
 		}
 		else if(Rx_Buffer[4] == f_ack)
 		{
@@ -1388,7 +1426,7 @@ void Listen_Radio(uint8_t reset_fail_count)
 		if(fail_count < 4)
 		{
 			fail_count++;
-			Listen_Radio(0);
+			Listen_Radio(0, 0);
 		}
 		else  // Catches case where we miss an ack and last wakeup was 0
 		{
@@ -1416,7 +1454,7 @@ void Set_Wakeup(uint8_t error)
 		if(wakeup == 0)
 		{
 			DEBUG_TX("Set_Wakeup, calling Listen_Radio\r\n\0");
-			Listen_Radio(1);
+			Listen_Radio(1, 0);
 		}
 		else
 		{
@@ -1438,25 +1476,6 @@ void Store_Config(int length)
 	//sprintf(debug_buff, "Data: %s", Rx_Buffer+pos);
 	//DEBUG_TX(debug_buff);
 	//DEBUG_TX("\r\n\0");
-	/*
-	i = pos;
-	j = pos;
-	while(i<length)
-	{
-		if(Rx_Buffer[i] == "|")
-		{
-			Rx_Buffer[j] = Rx_Buffer[i+1]+128;
-			i = i+2;
-			j++;
-		}
-		else
-		{
-			Rx_Buffer[j] = Rx_Buffer[i];
-			i++;
-			j++;
-		}
-	}
-	*/
 	if(strncmp(Rx_Buffer+pos, "S", 1) == 0)
 	{
 		s = Rx_Buffer[pos+1];
@@ -1464,13 +1483,11 @@ void Store_Config(int length)
 			r = Rx_Buffer[pos+3];
 		//sprintf(debug_buff, "Screen: %d, region: %d\r\n", s, r);
 		//DEBUG_TX(debug_buff);
-		//for(i=0; i<64; i++)
-		//	debug_buff[i] = 0;
 		for(i=0; i<Rx_Buffer[5]; i++)
 		{
 			screens[s][r][i] = Rx_Buffer[i+pos+4];
-		//	sprintf(debug_buff, "%c", screens[s][r][i]);
-		//	DEBUG_TX(debug_buff);
+			//sprintf(debug_buff, "%c %d\r\n", screens[s][r][i], (int)(screens[s][r][i]));
+			//DEBUG_TX(debug_buff);
 		}
 		//DEBUG_TX(" \r\n\0");
 		//DEBUG_TX(" Store_Config, ord values:\r\n\0");
@@ -1536,8 +1553,9 @@ int Read_Battery(uint8_t send)
 	566, 568, 570, 573, 575, 577, 580, 582, 584, 587, 589, 592, 594, 596, 599, 601};
 
 	uint32_t adc_value = 0x55;
-	uint8_t alert[] = {0x02, 0x00};
-	int volts;
+	uint8_t alert[] = {0x02, 0x00, 0x00, 0x00};
+	int volts = 0;
+
 	MX_ADC_Init();
 	HAL_GPIO_WritePin(GPIOB, BATT_READ_Pin, GPIO_PIN_SET);
 	Delay_ms(100);
@@ -1567,9 +1585,11 @@ int Read_Battery(uint8_t send)
 		if(send)
 		{
 			alert[1] = adc_value >> 8;
-			sprintf(debug_buff, "Sending alert: %x %x\r\n", alert[0], alert[1]);
+			alert[2] = Get_RSSI();
+			alert[3] = Get_Temperature();
+			sprintf(debug_buff, "Sending alert: %x %x %x %x\r\n", alert[0], alert[1], alert[2], alert[3]);
 			DEBUG_TX(debug_buff);
-			Send_Message(f_alert, 2, alert, 1, 0);
+			Send_Message(f_alert, 4, alert, 1, 0);
 		}
 	}
 	return volts;
@@ -1585,10 +1605,11 @@ uint8_t Message_Search(uint8_t *address, uint8_t *Rx_Buffer, int *ms_length, uin
 	while (1)
 	{
 		__HAL_UART_FLUSH_DRREGISTER(&huart3);
-		if(current_state != STATE_INITIAL) // So we can display "sending" message if there is no immediate ack
-			status = Rx_Message(Rx_Buffer, &length, 800);
-		else
-			status = Rx_Message(Rx_Buffer, &length, 1600);
+		//if(current_state != STATE_INITIAL) // So we can display "sending" message if there is no immediate ack
+		//	status = Rx_Message(Rx_Buffer, &length, 800);
+		//else
+		//	status = Rx_Message(Rx_Buffer, &length, 1600);
+		status = Rx_Message(Rx_Buffer, &length, 800);
 		ms_length = &length;
 		if (status == HAL_OK)
 		{
@@ -1744,6 +1765,7 @@ int8_t Get_RSSI(void)
 	int r;
 	int8_t rssi;
 	__HAL_UART_FLUSH_DRREGISTER(&huart3);
+	Delay_ms(100);
 	RADIO_TXS("ER_CMD#T8", 9);
 	status = Rx_Message(Rx_Buffer, &length, 3000);
 	DEBUG_TX("RSSI echo:");
@@ -1751,7 +1773,6 @@ int8_t Get_RSSI(void)
 	Delay_ms(5);
 	RADIO_TXS("ACK", 3);
 	status = Rx_Message(Rx_Buffer, &length, 3000);
-	DEBUG_TX("RSSI:");
 	r = atoi(Rx_Buffer);
 	if(r > 127)
 		r = 127;
@@ -1763,37 +1784,51 @@ int8_t Get_RSSI(void)
 	return rssi;
 }
 
-void Configure_And_Test(void)
+void Configure_And_Test(uint8_t reset)
 {
-	int voltage = 0;
-	uint8_t network_found = 0;
+	int 				voltage 				= 0;
+	uint8_t 			network_found 			= 0;
+	uint8_t 			addr[2] 				= {0xFF, 0xFF};
 
 	voltage = Read_Battery(0);
 	Radio_On(1);
-	__HAL_UART_FLUSH_DRREGISTER(&huart3);
-	RADIO_TXS("ER_CMD#R0", 9);
-	status = Rx_Message(Rx_Buffer, &length, 3000);
-	DEBUG_TX("Reset radio:");
-	Print_To_Debug(&Rx_Buffer, length);
-	Delay_ms(10);
-	RADIO_TXS("ACK", 3);
-	Delay_ms(200);
-
-	// Set OTA data rate to 1200 bps
-	__HAL_UART_FLUSH_DRREGISTER(&huart3);
-	RADIO_TXS("ER_CMD#B0", 9);
-	status = Rx_Message(Rx_Buffer, &length, 3000);
-	DEBUG_TX("Reset b/w:");
-	Print_To_Debug(&Rx_Buffer, length);
-	Delay_ms(5);
-	RADIO_TXS("ACK", 3);
-	Delay_ms(5);
-
-	__HAL_UART_FLUSH_DRREGISTER(&huart3);
-	status = Rx_Message(Rx_Buffer, &length, 8000);
-	if (status == HAL_OK)
+	if(reset)
 	{
-		bridge_address[0] = Rx_Buffer[2]; bridge_address[1] = Rx_Buffer[3];
+		__HAL_UART_FLUSH_DRREGISTER(&huart3);
+		RADIO_TXS("ER_CMD#R0", 9);
+		status = Rx_Message(Rx_Buffer, &length, 3000);
+		DEBUG_TX("Reset radio:");
+		Print_To_Debug(&Rx_Buffer, length);
+		Delay_ms(10);
+		RADIO_TXS("ACK", 3);
+		Delay_ms(200);
+
+		// Set OTA data rate to 1200 bps
+		__HAL_UART_FLUSH_DRREGISTER(&huart3);
+		//RADIO_TXS("ER_CMD#B0", 9);
+		RADIO_TXS("ER_CMD#B1", 9);
+		status = Rx_Message(Rx_Buffer, &length, 3000);
+		DEBUG_TX("Reset b/w:");
+		Print_To_Debug(&Rx_Buffer, length);
+		Delay_ms(5);
+		RADIO_TXS("ACK", 3);
+		Delay_ms(5);
+
+		// Set frequency to 870.35 MHz
+		__HAL_UART_FLUSH_DRREGISTER(&huart3);
+		RADIO_TXS("ER_CMD#C6", 9);
+		status = Rx_Message(Rx_Buffer, &length, 3000);
+		DEBUG_TX("Set radio frequncy");
+		Print_To_Debug(&Rx_Buffer, length);
+		Delay_ms(5);
+		RADIO_TXS("ACK", 3);
+		Delay_ms(5);
+	}
+
+	__HAL_UART_FLUSH_DRREGISTER(&huart3);
+	if(Message_Search(beacon_address, Rx_Buffer, &length, 80000) == SEARCH_OK)
+	{
+		addr[0] = Rx_Buffer[2]; addr[1] = Rx_Buffer[3];
 		network_found = 1;
 		DEBUG_TX("Rx from network:");
 		Print_To_Debug(&Rx_Buffer, length);
@@ -1810,7 +1845,7 @@ void Configure_And_Test(void)
 	screens[16][0][28] = 0x43;  // C
 	if(network_found)
 	{
-	  	sprintf(screens[16][0]+57, "Y\x30G\x16Gridge %02X%02X: %7s", (int)bridge_address[0], (int)bridge_address[1], Rx_Buffer);
+	  	sprintf(screens[16][0]+57, "Y\x30G\x16Gridge %02X%02X: %7s", (int)addr[0], (int)addr[1], Rx_Buffer);
 	  	screens[16][0][59] = 0x43;  // C
 		screens[16][0][61] = 0x42;  // B
 	}

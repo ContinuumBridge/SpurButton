@@ -34,7 +34,7 @@
 // 33 Replacement old one
 // 37
 
-const uint32_t node_id_int = 17;
+const uint32_t node_id_int = 30;
 
 void Set_Node_ID(uint8_t *node_id)
 {

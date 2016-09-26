@@ -56,10 +56,10 @@ extern char 			debug_buff[128];
 extern int8_t 			temperature;
 
 void *array_concat(const void *a, size_t an, const void *b, size_t bn, size_t s);
-void Radio_Tx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size);
+HAL_StatusTypeDef Radio_Tx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size);
 void Debug_Tx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size);
 void Radio_Rx_IT(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size);
-void Radio_Tx_IT(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size);
+HAL_StatusTypeDef Radio_Tx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size);
 uint16_t Radio_Rx(UART_HandleTypeDef *uart, uint8_t *buffer, uint16_t buffer_size, uint16_t timeout);
 
 void DWT_Init(void);
