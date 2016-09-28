@@ -36,7 +36,7 @@
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
 //#define CB_DEMO_0
-#define VERSION					1
+#define VERSION					2
 #define FONT_2 					Arial_Narrow14x20
 //#define FONT_2 					Arial_Unicode_MS17x20
 #define FONT_3 					Arial_Narrow18x26
@@ -68,7 +68,7 @@
 #define T_LONG_PRESS          	2    // Units: 1 second
 #define T_DOUBLE_PRESS_16		8    // Units: 1/16 second
 #define T_RESET_PRESS         	8    // Units: 1 second
-#define T_MAX_RESET_PRESS		20   // To catch failure case
+#define T_MAX_RESET_PRESS		60   // To catch failure case
 
 #define MAX_SCREEN 				38
 #define REGIONS 2
@@ -162,6 +162,7 @@ uint8_t				display_initialised		= 0;
 int8_t 				temperature;
 int8_t 				rssi;
 uint8_t				using_side				= BOTH_SIDES;
+uint8_t				no_long_check			= 0;
 
 typedef enum {initial, normal, pressed, search, search_failed, reverting, demo} NodeState;
 NodeState         node_state           = initial;
@@ -499,6 +500,12 @@ void Set_Display(uint8_t screen_num)
 	display_initialised = 0;
 	ecog_cls();
 	Build_Screen(screen_num);
+	// To avoid false detection of long presses
+	if(((HAL_GPIO_ReadPin(GPIOA, PUSH_RIGHT_Pin) == GPIO_PIN_SET) && (HAL_GPIO_ReadPin(GPIOA, LEFT_PUSH_Pin) == GPIO_PIN_SET)))
+	{
+		no_long_check = 1;
+		DEBUG_TX("No long check\r\n");
+	}
 	ecog_update_display(1);
 	current_screen = screen_num;
 }
@@ -676,6 +683,7 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 	//DEBUG_TX(debug_buff);
 	if(button_pressed && (button_state == GPIO_PIN_RESET))
 	{
+		no_long_check = 0;
 		if(check_double[side])
 		{
 			check_double[0] = 0; check_double[1] = 0;
@@ -721,6 +729,11 @@ uint8_t On_Button_Press(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinStat
 	{
 		if(check_long[side])
 		{
+			if(no_long_check)
+			{
+				DEBUG_TX("NLC\r\n\0");
+				return PRESS_NONE;
+			}
 			check_long[0] = 0; check_long[1] = 0;
 			pressed_time = now - button_press_time[side];
 			//sprintf(debug_buff,"pressed_time: %d\r\n", (int)pressed_time);

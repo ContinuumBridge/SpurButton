@@ -32,9 +32,9 @@
 // 31 Martin Spur 2
 // 32 Steve Spur 2
 // 33 Replacement old one
-// 37
+// 39
 
-const uint32_t node_id_int = 30;
+const uint32_t node_id_int = 17;
 
 void Set_Node_ID(uint8_t *node_id)
 {
