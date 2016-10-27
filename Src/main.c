@@ -263,6 +263,8 @@ int main(void)
   HAL_DBGMCU_DisableDBGStopMode();
 
   DEBUG_TX("Hello Computer\r\n\0");
+  sprintf(debug_buff,"Node ID: %d\r\n", (int)node_id_int);
+  DEBUG_TX(debug_buff);
   /*
   while(1)
   {
@@ -828,6 +830,7 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 		if((button_press == PRESS_RIGHT_LONG) || (button_press == PRESS_LEFT_LONG))
 		{
 			wait_demo = 0;
+			include_state = 0;  // Force this with long press even if already including
 			Network_Include();
 		}
 		else if(button_press == PRESS_LEFT_DOUBLE)
@@ -996,6 +999,7 @@ void Network_Include(void)
 	DEBUG_TX("Network_Include\r\n\0");
 	if(include_state == 0)
 	{
+		node_address[0] = 0; node_address[1] = 0;  // Reset to not knowing network address
 		Set_Display(STATE_CONNECTING);
 		include_state = 1;
 	}
