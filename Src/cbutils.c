@@ -176,7 +176,7 @@ void RTC_Delay(uint32_t delay)    // Delay is in seconds
 	sAlarm.AlarmTime.Seconds = s;
 	sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
 	sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
-	sAlarm.AlarmMask = RTC_ALARMMASK_NONE;
+	sAlarm.AlarmMask = RTC_ALARMMASK_DATEWEEKDAY;
 	sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
 	sAlarm.AlarmDateWeekDay = 1;
 	sAlarm.Alarm = RTC_ALARM_A;
