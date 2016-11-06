@@ -36,7 +36,7 @@
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
 //#define CB_DEMO_0
-#define VERSION					2
+#define VERSION					3
 #define FONT_2 					Arial_Narrow14x20
 //#define FONT_2 					Arial_Unicode_MS17x20
 #define FONT_3 					Arial_Narrow18x26
@@ -87,7 +87,8 @@
 #define  f_start             	0x0B
 #define  f_nack                	0x0C
 #define  f_include_not         	0x0D
-#define	 f_unknown				0x0E
+#define  f_configuring			0x0E
+#define	 f_unknown				0x0F
 
 #define PRESS_LEFT_SINGLE	  	0
 #define PRESS_RIGHT_SINGLE    	1
@@ -265,21 +266,13 @@ int main(void)
   DEBUG_TX("Hello Computer\r\n\0");
   sprintf(debug_buff,"Node ID: %d\r\n", (int)node_id_int);
   DEBUG_TX(debug_buff);
-  /*
-  while(1)
-  {
-	  Delay_ms(62);
-	  uint32_t sixteenths_now = SIXTEENTHS_NOW;
-	  sprintf(debug_buff,"now: %d\r\n\0", (int)sixteenths_now);
-	  DEBUG_TX(debug_buff);
-	  Delay_ms(63);
-	  sprintf(debug_buff,"now: %d\r\n\0", (int)sixteenths_now);
-	  DEBUG_TX(debug_buff);
-  }
-  */
   Load_Normal_Screens();
   Initialise_States();
   ecog_init();
+  ecog_printfc(FONT_3, 4, "SPUR");
+  ecog_printfc(FONT_3, 34, "Resetting");
+  ecog_printfc(FONT_3, 64, "Please wait");
+  ecog_update_display(0);
 
   // Reset radio
   Configure_And_Test(1);
@@ -1425,6 +1418,13 @@ void Listen_Radio(uint8_t reset_fail_count, uint8_t no_listen)
 			Read_Battery(1);
 			//Set_Wakeup(0);
 		}
+		else if(Rx_Buffer[4] == f_configuring)
+		{
+			DEBUG_TX("Listen_Radio. Configuring message received\r\n\0");
+			Set_Display(STATE_CONFIG);
+			Send_Message(f_ack, 0, data, 0, 0);
+			Set_Wakeup(0);
+		}
 		else if(Rx_Buffer[4] == f_ack)
 		{
 			DEBUG_TX("Listen_Radio. Ack received\r\n\0");
@@ -1806,6 +1806,7 @@ void Configure_And_Test(uint8_t reset)
 	int 				voltage 				= 0;
 	uint8_t 			network_found 			= 0;
 	uint8_t 			addr[2] 				= {0xFF, 0xFF};
+	int 				intaddr;
 
 	voltage = Read_Battery(0);
 	Radio_On(1);
@@ -1814,7 +1815,7 @@ void Configure_And_Test(uint8_t reset)
 		__HAL_UART_FLUSH_DRREGISTER(&huart3);
 		RADIO_TXS("ER_CMD#R0", 9);
 		status = Rx_Message(Rx_Buffer, &length, 3000);
-		DEBUG_TX("Reset radio:");
+		DEBUG_TX("Reset radio: ");
 		Print_To_Debug(&Rx_Buffer, length);
 		Delay_ms(10);
 		RADIO_TXS("ACK", 3);
@@ -1825,7 +1826,7 @@ void Configure_And_Test(uint8_t reset)
 		//RADIO_TXS("ER_CMD#B0", 9);
 		RADIO_TXS("ER_CMD#B1", 9);
 		status = Rx_Message(Rx_Buffer, &length, 3000);
-		DEBUG_TX("Reset b/w:");
+		DEBUG_TX("Reset b/w: ");
 		Print_To_Debug(&Rx_Buffer, length);
 		Delay_ms(5);
 		RADIO_TXS("ACK", 3);
@@ -1835,34 +1836,42 @@ void Configure_And_Test(uint8_t reset)
 		__HAL_UART_FLUSH_DRREGISTER(&huart3);
 		RADIO_TXS("ER_CMD#C6", 9);
 		status = Rx_Message(Rx_Buffer, &length, 3000);
-		DEBUG_TX("Set radio frequncy");
+		DEBUG_TX("Set radio frequency: ");
 		Print_To_Debug(&Rx_Buffer, length);
 		Delay_ms(5);
 		RADIO_TXS("ACK", 3);
 		Delay_ms(5);
+		DEBUG_TX("Set radio freq ack\r\n\0");
 	}
 
 	__HAL_UART_FLUSH_DRREGISTER(&huart3);
-	if(Message_Search(beacon_address, Rx_Buffer, &length, 80000) == SEARCH_OK)
+	if(Message_Search(beacon_address, Rx_Buffer, &length, 20000) == SEARCH_OK)
 	{
 		addr[0] = Rx_Buffer[2]; addr[1] = Rx_Buffer[3];
+		intaddr = (addr[0] << 8) | addr[1];
 		network_found = 1;
 		DEBUG_TX("Rx from network:");
 		Print_To_Debug(&Rx_Buffer, length);
+		sprintf(debug_buff, "intaddr: %d\r\n", intaddr);
+		DEBUG_TX(debug_buff);
 	}
 	else
-		DEBUG_TX("Receive problem\r\n\0");
+		DEBUG_TX("Conifgure Rx problem\r\n\0");
 	rssi = Get_RSSI();
 	Radio_Off();
 	sprintf(debug_buff, "Battery voltage: %d.%d\r\n", (int)(voltage/100), voltage%100);
 	DEBUG_TX(debug_buff);
-	sprintf(screens[16][0], "F\x02Y\x04G\x13Node ID: %010d", (int)node_id_int);
+	sprintf(screens[16][0], "F\x02Y\x04G\x13Node ID: %d", (int)node_id_int);
 	screens[16][0][4] = 0x43;  // C
 	sprintf(screens[16][0]+26, "Y\x1AG\x1AVer: %03d    Battery: %1d.%2dV", VERSION, (int)(voltage/100), voltage%100);
 	screens[16][0][28] = 0x43;  // C
 	if(network_found)
 	{
-	  	sprintf(screens[16][0]+57, "Y\x30G\x16Gridge %02X%02X: %7s", (int)addr[0], (int)addr[1], Rx_Buffer);
+		if(rssi != 0) // atoi returns 0 if conversion cannot be performed
+			//sprintf(screens[16][0]+57, "Y\x30G\x16Gridge %02X%02X: %7s", (int)addr[0], (int)addr[1], Rx_Buffer);
+			sprintf(screens[16][0]+57, "Y\x30G\x16Gridge %05u: %7s", intaddr, Rx_Buffer);
+		else
+			sprintf(screens[16][0]+57, "Y\x30G\x16Gridge %05u: %7s", intaddr, "RSSI: ?");
 	  	screens[16][0][59] = 0x43;  // C
 		screens[16][0][61] = 0x42;  // B
 	}

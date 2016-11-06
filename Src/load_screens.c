@@ -26,9 +26,8 @@ void Load_Normal_Screens(void)
 	//char buff[25];
 	strcpy(screens[17][0], "F\x03" "Y\x05" "C\x07" "Network\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
 			              	  "C\x0A" "Not in use\xFF" "ES");
-	strcpy(screens[18][0], "F\x03" "Y\x05" "C\x0C" "Message sent\xFF" "Y\x20" "C\x0B" "Waiting for\xFF" "Y\x3D"
-		              	  "C\x08" "response\xFF" "ES");
-	sprintf(screens[19][0], "F\x02Y\x04G\x13Node ID: %010d", node_id_int);
+	strcpy(screens[18][0], "F\x02" "Y\x12" "C\x04" "Busy\xFF" "F\x03" "Y\x38" "C\x0B" "Please wait\xFF" "ES");
+	sprintf(screens[19][0], "F\x02Y\x04G\x13Node ID: %d", node_id_int);
 	screens[19][0][4] = 0x43;  // C
 	strcpy(screens[19][0] + 26, "Y\x1A" "C\x1A" "Sign into portal.spur.site\xFF"
 			              "Y\x30" "C\x17" "Enter Node ID then push\xFF" "Y\x46" "C\x1A" "here for 3 secs to connect\xFF" "ES");
@@ -36,7 +35,7 @@ void Load_Normal_Screens(void)
 	//DEBUG_TX(debug_buff);
 	strcpy(screens[20][0], "F\x03" "Y\x05" "C\x0A" "Connecting\xFF" "Y\x20" "C\x0A" "to network\xFF" "Y\x3D"
 						   "C\x0B" "Please wait\xFF" "ES");
-	strcpy(screens[21][0], "F\x02" "Y\x05" "C\x09" "Connected\xFF" "Y\x20" "C\x0B" "Configuring\xFF" "Y\x3D"
+	strcpy(screens[21][0], "F\x02" "Y\x05" "C\x14" "Connected to network\xFF" "F\x03" "Y\x20" "C\x11" "Updating software\xFF" "Y\x3D"
 			              	 "C\x0B" "Please wait\xFF" "ES");
 	strcpy(screens[22][0], "F\x02" "Y\x10" "C\x0B" "Spur button\xFF" "Y\x32" "C\x0E" "name not known\xFF" "ES");
 	strcpy(screens[23][0], "F\x03" "Y\x05" "C\x0D" "Communication\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"

@@ -221,7 +221,6 @@ void Enable_IRQ(uint8_t using_side)
 void Print_To_Debug(uint8_t *buffer, int length)
 {
 	int i;
-	DEBUG_TX("Received:\r\n\0");
 	for(i=0; i<length; i++)
 	{
 		sprintf(debug_buff, "%x ", *buffer);
