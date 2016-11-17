@@ -192,7 +192,7 @@ void Power_Down(void);
 void On_RTC_IRQ(void);
 void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState button_state);
 void Initialise_States(void);
-void On_NewState(void);
+void On_NewState(uint8_t enable_send);
 int Read_Battery(uint8_t send);
 int8_t Get_RSSI(void);
 void Configure_And_Test(uint8_t reset);
@@ -919,7 +919,7 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 				current_state = states[current_state][0];
 		}
 		if(current_state != old_state)
-			On_NewState();
+			On_NewState(1);
 		else if(!changed)
 		{
 		    DEBUG_TX("Press not used in this state\r\n\0");
@@ -929,7 +929,7 @@ void On_Button_IRQ(uint16_t button_pressed, uint16_t GPIO_Pin, GPIO_PinState but
 	}
 }
 
-void On_NewState(void)
+void On_NewState(uint8_t enable_send)
 {
 	uint8_t alert_id[] = {0x00, 0x00};
 	sprintf(debug_buff, "On_NewState, state: %d\r\n", current_state);
@@ -944,7 +944,7 @@ void On_NewState(void)
 		else
 			DEBUG_TX("Problem writing inverse\r\n\0");
 	}
-	if(states[current_state][S_A] != 0xFF)
+	if((states[current_state][S_A] != 0xFF) && enable_send)
 	{
 		Host_Ready();
 		alert_id[1] = states[current_state][S_A]; alert_id[0] = 0x00;
@@ -961,8 +961,6 @@ void On_NewState(void)
 	{
 		DEBUG_TX("On_NewState delay\r\n\0");
 		RTC_Delay(states[current_state][S_W]);
-		//current_state = states[current_state][S_WS];
-		//On_NewState();
 	}
 }
 
@@ -1072,7 +1070,7 @@ void Network_Include(void)
 				DEBUG_TX("Sent ack for grant\r\n\0");
 				include_state = 0;
 				current_state = STATE_CONFIG;
-				On_NewState();
+				On_NewState(1);
 				DEBUG_TX("Sending woken_up after grant\r\n\0");
 				Send_Message(f_woken_up, 0, data, 1, 0);
 			}
@@ -1080,7 +1078,7 @@ void Network_Include(void)
 			{
 				DEBUG_TX("Received include_not\r\n\0");
 				current_state = STATE_NOT_GRANT;
-				On_NewState();
+				On_NewState(1);
 			}
 		}
 	}
@@ -1342,7 +1340,7 @@ void Manage_Send(uint8_t ack, uint8_t beacon, uint8_t function)
 					DEBUG_TX("Manage_Send failure. Waiting 10 mins\r\n\0");
 					current_state = STATE_PROBLEM;
 					Radio_Off();
-					On_NewState();
+					On_NewState(1);
 					RTC_Delay(600);
 					break;
 				case 11:
@@ -1408,7 +1406,7 @@ void Listen_Radio(uint8_t reset_fail_count, uint8_t no_listen)
 			else
 				current_state = STATE_NORMAL;
 			Send_Message(f_ack, 0, data, 0, 0);
-			On_NewState();
+			On_NewState(0);
 			Set_Wakeup(0);
 		}
 		else if(Rx_Buffer[4] == f_send_battery)
@@ -1532,7 +1530,7 @@ void Store_Config(int length)
 		if(states[current_state][S_XV] == app_value)
 		{
 			current_state = states[current_state][S_XS];
-			On_NewState();
+			On_NewState(1);
 		}
 	}
 	else if(strncmp(Rx_Buffer+pos, "M", 1) == 0)
@@ -1741,7 +1739,7 @@ void On_RTC_IRQ(void)
 		DEBUG_TX("Woken up after delay\r\n\0");
 		Radio_On(1);
 		current_state = states[current_state][S_WS];
-		On_NewState();
+		On_NewState(1);
 	}
 	else
 	{

@@ -26,7 +26,7 @@ void Load_Normal_Screens(void)
 	//char buff[25];
 	strcpy(screens[17][0], "F\x03" "Y\x05" "C\x07" "Network\xFF" "Y\x20" "C\x07" "problem\xFF" "Y\x3D"
 			              	  "C\x0A" "Not in use\xFF" "ES");
-	strcpy(screens[18][0], "F\x02" "Y\x12" "C\x04" "Busy\xFF" "F\x03" "Y\x38" "C\x0B" "Please wait\xFF" "ES");
+	strcpy(screens[18][0], "F\x02" "Y\x12" "C\x0B" "Working ...\xFF" "F\x03" "Y\x38" "C\x0B" "Please wait\xFF" "ES");
 	sprintf(screens[19][0], "F\x02Y\x04G\x13Node ID: %d", node_id_int);
 	screens[19][0][4] = 0x43;  // C
 	strcpy(screens[19][0] + 26, "Y\x1A" "C\x1A" "Sign into portal.spur.site\xFF"
