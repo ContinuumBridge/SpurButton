@@ -362,7 +362,8 @@ __HAL_UART_FLUSH_DRREGISTER(&huart3);
 		  Delay_ms(20);
 		  HAL_UART_MspDeInit(&huart1);
 		  //HAL_PWR_EnterSTANDBYMode();
-		  //SysTick->CTRL  &= ~SysTick_CTRL_TICKINT_Msk;        // systick IRQ off
+		  SystemPower_Config();
+		  SysTick->CTRL  &= ~SysTick_CTRL_TICKINT_Msk;        // systick IRQ off
 		  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
 	  }
   }
@@ -453,6 +454,8 @@ static void SYSCLKConfig_STOP(void)
 static void SystemPower_Config(void)
 {
   //GPIO_InitTypeDef GPIO_InitStructure = {0};
+  /* Enable Power Control clock */
+  __HAL_RCC_PWR_CLK_ENABLE();
   /* Enable Ultra low power mode */
   HAL_PWREx_EnableUltraLowPower();
   /* Enable the fast wake up from Ultra low power mode */
